@@ -13,11 +13,14 @@ class TrayController(QObject):
         self,
         on_toggle: Callable[[], None],
         on_refresh: Callable[[], None],
+        on_toggle_startup: Callable[[bool], None],
+        startup_enabled: bool,
         on_exit: Callable[[], None],
     ) -> None:
         super().__init__()
         self._on_toggle = on_toggle
         self._on_refresh = on_refresh
+        self._on_toggle_startup = on_toggle_startup
         self._on_exit = on_exit
 
         self._tray = QSystemTrayIcon(self)
@@ -29,6 +32,12 @@ class TrayController(QObject):
         refresh_action = QAction("Refresh", menu)
         refresh_action.triggered.connect(self._on_refresh)
         menu.addAction(refresh_action)
+
+        self._startup_action = QAction("Start with Windows", menu)
+        self._startup_action.setCheckable(True)
+        self._startup_action.setChecked(startup_enabled)
+        self._startup_action.toggled.connect(self._on_toggle_startup)
+        menu.addAction(self._startup_action)
 
         menu.addSeparator()
 
@@ -46,6 +55,11 @@ class TrayController(QObject):
 
     def geometry(self) -> QRect:
         return self._tray.geometry()
+
+    def set_startup_checked(self, enabled: bool) -> None:
+        self._startup_action.blockSignals(True)
+        self._startup_action.setChecked(enabled)
+        self._startup_action.blockSignals(False)
 
     def _on_activated(self, reason: QSystemTrayIcon.ActivationReason) -> None:
         if reason == QSystemTrayIcon.ActivationReason.Trigger:

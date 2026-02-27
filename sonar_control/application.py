@@ -13,6 +13,7 @@ from .config import AppConfig, config_file_path, load_config, save_config
 from .notifications import Notifier
 from .sonar_api_switcher import DeviceSelection, SonarApiSwitcher
 from .sonar_client import SonarClient
+from .startup import is_startup_enabled, set_startup_enabled
 from .tray import TrayController
 from .ui import FlyoutMixerWindow
 
@@ -53,6 +54,8 @@ class SonarControlApplication:
         self._tray = TrayController(
             on_toggle=self.toggle_window,
             on_refresh=self.refresh_channels,
+            on_toggle_startup=self.toggle_startup_with_windows,
+            startup_enabled=is_startup_enabled(),
             on_exit=self.exit_app,
         )
         self._window.hide()
@@ -215,6 +218,22 @@ class SonarControlApplication:
 
     def _toggle_window_main(self) -> None:
         self._window.toggle_near(self._tray.geometry())
+
+    def toggle_startup_with_windows(self, enabled: bool) -> None:
+        def work() -> None:
+            try:
+                set_startup_enabled(enabled)
+                actual = is_startup_enabled()
+                self._window.dispatch(lambda: self._tray.set_startup_checked(actual))
+                state = "enabled" if actual else "disabled"
+                self._window.dispatch(lambda: self._window.set_status(self._status(f"startup {state}")))
+                self._notifier.show("Sonar", f"Start with Windows {state}")
+            except Exception as exc:
+                msg = f"Startup toggle error: {exc}"
+                self._window.dispatch(lambda m=msg: self._window.set_status(self._status(m)))
+                self._window.dispatch(lambda: self._tray.set_startup_checked(is_startup_enabled()))
+
+        threading.Thread(target=work, daemon=True).start()
 
     def exit_app(self) -> None:
         if not self._alive:
