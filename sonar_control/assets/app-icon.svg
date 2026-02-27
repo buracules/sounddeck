@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <!-- Use currentColor so you can tint in code; default looks white if you set color to white -->
+  <g fill="currentColor">
+    <!-- Left slider rail -->
+    <rect x="14" y="8" width="6" height="48" rx="3"></rect>
+    <!-- Left knob -->
+    <rect x="9" y="18" width="16" height="16" rx="6"></rect>
+    <rect x="12" y="22" width="10" height="2" rx="1" fill="none"></rect>
+    <rect x="12" y="28" width="10" height="2" rx="1" fill="none"></rect>
+
+    <!-- Middle slider rail -->
+    <rect x="29" y="8" width="6" height="48" rx="3"></rect>
+    <!-- Middle knob -->
+    <rect x="24" y="24" width="16" height="16" rx="6"></rect>
+    <rect x="27" y="28" width="10" height="2" rx="1" fill="none"></rect>
+    <rect x="27" y="34" width="10" height="2" rx="1" fill="none"></rect>
+
+    <!-- Right slider rail -->
+    <rect x="44" y="8" width="6" height="48" rx="3"></rect>
+    <!-- Right knob -->
+    <rect x="39" y="30" width="16" height="16" rx="6"></rect>
+    <rect x="42" y="34" width="10" height="2" rx="1" fill="none"></rect>
+    <rect x="42" y="40" width="10" height="2" rx="1" fill="none"></rect>
+  </g>
+</svg>
