@@ -34,6 +34,27 @@ cd D:\Projects\AudioSwitcher\sonar-control-panel
 .\.venv\Scripts\python app.py
 ```
 
+## Build Installer (Windows)
+
+1. Install Inno Setup 6 (`ISCC.exe` must be available under Program Files).
+2. Build app + setup:
+
+```powershell
+cd D:\Projects\AudioSwitcher\sonar-control-panel
+.\build-installer.ps1 -Version 1.0.0
+```
+
+Optional clean build:
+
+```powershell
+.\build-installer.ps1 -Version 1.0.0 -Clean
+```
+
+Outputs:
+
+- App folder: `dist\SonarMixer\`
+- Installer: `dist\SonarMixer-Setup-<version>.exe`
+
 ## CLI Utilities
 
 ```powershell
