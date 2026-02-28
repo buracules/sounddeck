@@ -2,6 +2,8 @@
 
 Modern PySide6 system-tray flyout mixer for SteelSeries Sonar.
 
+![Sonar Mixer Screenshot](docs/screenshot.jpg)
+
 ## Highlights
 
 - Tray-first UX (`QSystemTrayIcon`) with flyout mixer panel
