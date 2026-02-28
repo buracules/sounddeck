@@ -9,6 +9,11 @@ run.out.log
 run.err.log
 ipc-capture.json
 
+# Build outputs
+build/
+dist/
+*.spec
+
 # OS/editor
 .DS_Store
 Thumbs.db
