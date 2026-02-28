@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from pathlib import Path
 import sys
+from time import monotonic
 
 from PySide6.QtCore import QObject, QRect, Qt
 from PySide6.QtGui import QAction, QColor, QIcon, QPainter, QPixmap
@@ -28,6 +29,7 @@ class TrayController(QObject):
         self._tray.setIcon(self._build_icon())
         self._tray.setToolTip("Sonar Mixer")
         self._tray.activated.connect(self._on_activated)
+        self._last_trigger_at = 0.0
 
         menu = QMenu()
         refresh_action = QAction("Refresh", menu)
@@ -64,12 +66,17 @@ class TrayController(QObject):
 
     def _on_activated(self, reason: QSystemTrayIcon.ActivationReason) -> None:
         if reason == QSystemTrayIcon.ActivationReason.Trigger:
+            self._last_trigger_at = monotonic()
             self._on_refresh()
             self._on_toggle()
         elif reason == QSystemTrayIcon.ActivationReason.Context:
             # Let Qt show context menu.
             return
         elif reason == QSystemTrayIcon.ActivationReason.DoubleClick:
+            # Some platforms emit Trigger then DoubleClick for a double tap.
+            # Ignore the second signal so the flyout does not toggle twice.
+            if monotonic() - self._last_trigger_at < 0.35:
+                return
             self._on_refresh()
             self._on_toggle()
 
