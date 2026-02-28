@@ -31,6 +31,7 @@ Write-Host "Building executable with PyInstaller..."
     "$root\app.py" | Out-Host
 
 $isccCandidates = @(
+    "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe",
     "$env:ProgramFiles(x86)\Inno Setup 6\ISCC.exe",
     "$env:ProgramFiles\Inno Setup 6\ISCC.exe"
 )

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from pathlib import Path
+import sys
 
 from PySide6.QtCore import QObject, QRect, Qt
 from PySide6.QtGui import QAction, QColor, QIcon, QPainter, QPixmap
@@ -72,18 +73,10 @@ class TrayController(QObject):
 
     @staticmethod
     def _build_icon() -> QIcon:
-        assets_dir = Path(__file__).resolve().parent / "assets"
-        svg_icon = assets_dir / "app-icon.svg"
-        if svg_icon.exists():
-            tinted = TrayController._tinted_icon(svg_icon, QColor("#e8eef7"), 32)
+        for asset in TrayController._asset_candidates():
+            tinted = TrayController._tinted_icon(asset, QColor("#e8eef7"), 32)
             if not tinted.isNull():
                 return tinted
-
-        png_icon = assets_dir / "app-icon.png"
-        if png_icon.exists():
-            icon = QIcon(str(png_icon))
-            if not icon.isNull():
-                return icon
 
         size = 32
         px = QPixmap(size, size)
@@ -106,7 +99,24 @@ class TrayController(QObject):
         return QIcon(px)
 
     @staticmethod
+    def _asset_candidates() -> list[Path]:
+        candidates: list[Path] = []
+        local_assets = Path(__file__).resolve().parent / "assets"
+        candidates.append(local_assets / "app-icon.svg")
+        candidates.append(local_assets / "app-icon.png")
+
+        meipass = getattr(sys, "_MEIPASS", None)
+        if meipass:
+            bundled_assets = Path(str(meipass)) / "sonar_control" / "assets"
+            candidates.append(bundled_assets / "app-icon.svg")
+            candidates.append(bundled_assets / "app-icon.png")
+        return candidates
+
+    @staticmethod
     def _tinted_icon(path: Path, color: QColor, size: int) -> QIcon:
+        if not path.exists():
+            return QIcon()
+
         base_icon = QIcon(str(path))
         if base_icon.isNull():
             return QIcon()
@@ -125,3 +135,4 @@ class TrayController(QObject):
         finally:
             painter.end()
         return QIcon(out)
+
