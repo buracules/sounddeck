@@ -64,11 +64,13 @@ class TrayController(QObject):
 
     def _on_activated(self, reason: QSystemTrayIcon.ActivationReason) -> None:
         if reason == QSystemTrayIcon.ActivationReason.Trigger:
+            self._on_refresh()
             self._on_toggle()
         elif reason == QSystemTrayIcon.ActivationReason.Context:
             # Let Qt show context menu.
             return
         elif reason == QSystemTrayIcon.ActivationReason.DoubleClick:
+            self._on_refresh()
             self._on_toggle()
 
     @staticmethod

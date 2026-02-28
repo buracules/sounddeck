@@ -276,8 +276,8 @@ class ChipListWidget(QListWidget):
     def _chip_size_hint(self, label: str) -> QSize:
         metrics = QFontMetrics(QFont("Segoe UI", 9))
         text_w = metrics.horizontalAdvance(label.strip())
-        max_w = max(78, self.viewport().width() - 8)
-        width = min(max_w, max(64, text_w + 24))
+        max_w = max(64, self.viewport().width() - 8)
+        width = min(max_w, max(40, text_w + 18))
         return QSize(width, 24)
 
     def _reflow_chip_widths(self) -> None:
@@ -329,7 +329,7 @@ class AppChipDelegate(QStyledItemDelegate):
         painter.setBrush(bg_color)
         painter.drawRoundedRect(rect, radius, radius)
 
-        text_rect = rect.adjusted(10, 0, -8, 0)
+        text_rect = rect.adjusted(8, 0, -6, 0)
         painter.setPen(QColor("#e8eef7"))
         elided = painter.fontMetrics().elidedText(text, Qt.TextElideMode.ElideRight, text_rect.width())
         painter.drawText(text_rect, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, elided)

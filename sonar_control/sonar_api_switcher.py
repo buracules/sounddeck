@@ -6,6 +6,8 @@ from urllib.error import HTTPError
 from urllib.parse import quote
 from urllib.request import Request, urlopen
 
+from .endpoints import discover_sonar_api_base
+
 
 @dataclass
 class SwitchResult:
@@ -44,6 +46,9 @@ class SonarApiSwitcher:
         "media": ("media", "aux", "auxiliary"),
         "chatCapture": ("chatcapture", "chat_capture", "mic", "microphone", "capture"),
     }
+
+    def __init__(self, base_url: str | None = None) -> None:
+        self._base_url = (base_url or discover_sonar_api_base(self.BASE_URL)).rstrip("/")
 
     def get_selection(self, channel_key: str) -> DeviceSelection:
         stream = self._resolve_stream_for_channel(channel_key)
@@ -174,7 +179,7 @@ class SonarApiSwitcher:
     def _put_stream_device(self, stream_id: str, device_id: str) -> None:
         encoded_device_id = quote(device_id, safe="{}.-")
         path = f"/streamRedirections/{stream_id}/deviceId/{encoded_device_id}"
-        req = Request(self.BASE_URL + path, data=b"{}", method="PUT", headers={"Content-Type": "application/json"})
+        req = Request(self._base_url + path, data=b"{}", method="PUT", headers={"Content-Type": "application/json"})
         try:
             with urlopen(req, timeout=4) as resp:
                 _ = resp.read()
@@ -185,7 +190,7 @@ class SonarApiSwitcher:
             raise RuntimeError(f"Sonar API PUT failed: {exc}") from exc
 
     def _get_json(self, path: str) -> object:
-        req = Request(self.BASE_URL + path, method="GET")
+        req = Request(self._base_url + path, method="GET")
         try:
             with urlopen(req, timeout=4) as resp:
                 raw = resp.read().decode("utf-8", errors="replace")

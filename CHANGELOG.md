@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog and this project follows Semantic Versioning.
 
+## [1.0.1] - 2026-02-28
+
+### Fixed
+- Auto-discover Sonar local API URL from GG IPC metadata instead of relying on hardcoded `http://127.0.0.1:7011`.
+- Restored compatibility when Sonar runs on dynamic local ports (for example `http://127.0.0.1:5079`).
+- Tray icon click now refreshes channel data before toggling the flyout.
+- Reduced chip minimum width/padding so short app names (for example `Opera`) render without excess empty space.
+
 ## [1.0.0] - 2026-02-28
 
 ### Added

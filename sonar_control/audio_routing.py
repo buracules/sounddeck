@@ -6,6 +6,8 @@ from urllib.error import HTTPError
 from urllib.parse import quote
 from urllib.request import Request, urlopen
 
+from .endpoints import discover_sonar_api_base
+
 
 @dataclass
 class AppSession:
@@ -20,6 +22,9 @@ class AppSession:
 
 class AudioRoutingClient:
     BASE_URL = "http://127.0.0.1:7011"
+
+    def __init__(self, base_url: str | None = None) -> None:
+        self._base_url = (base_url or discover_sonar_api_base(self.BASE_URL)).rstrip("/")
 
     def list_sessions(self) -> list[AppSession]:
         raw = self._get_json("/audioDeviceRouting")
@@ -90,7 +95,7 @@ class AudioRoutingClient:
         encoded_device = quote(target_device_id, safe="")
         path = f"/audioDeviceRouting/render/{encoded_device}/{process_id}"
         req = Request(
-            self.BASE_URL + path,
+            self._base_url + path,
             data=b"{}",
             method="PUT",
             headers={"Content-Type": "application/json"},
@@ -105,7 +110,7 @@ class AudioRoutingClient:
             raise RuntimeError(f"PUT {path} failed: {exc}") from exc
 
     def _get_json(self, path: str) -> object:
-        req = Request(self.BASE_URL + path, method="GET")
+        req = Request(self._base_url + path, method="GET")
         try:
             with urlopen(req, timeout=4) as resp:
                 return json.loads(resp.read().decode("utf-8", errors="replace"))
