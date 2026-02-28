@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from pathlib import Path
+import sys
 
 from PySide6.QtCore import QEvent, QMimeData, QObject, QPoint, QRect, QSize, Qt, Signal
 from PySide6.QtGui import QColor, QDrag, QFont, QFontMetrics, QGuiApplication, QPainter, QPen, QPixmap, QIcon
@@ -150,11 +151,16 @@ class IconDeviceCombo(QComboBox):
 
     @staticmethod
     def build_source_icon() -> QIcon:
-        svg_path = Path(__file__).resolve().parent / "assets" / "sound-source.svg"
-        if svg_path.exists():
-            icon = QIcon(str(svg_path))
-            if not icon.isNull():
-                return icon
+        candidates = [Path(__file__).resolve().parent / "assets" / "sound-source.svg"]
+        meipass = getattr(sys, "_MEIPASS", None)
+        if meipass:
+            candidates.append(Path(str(meipass)) / "sonar_control" / "assets" / "sound-source.svg")
+
+        for svg_path in candidates:
+            if svg_path.exists():
+                icon = QIcon(str(svg_path))
+                if not icon.isNull():
+                    return icon
 
         size = 18
         px = QPixmap(size, size)

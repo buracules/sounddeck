@@ -26,6 +26,7 @@ Write-Host "Building executable with PyInstaller..."
     --windowed `
     --name SonarMixer `
     --icon "$root\sonar_control\assets\app-icon.png" `
+    --add-data "$root\sonar_control\assets;sonar_control\assets" `
     --collect-all PySide6 `
     --collect-all steelseries_sonar_py `
     "$root\app.py" | Out-Host
