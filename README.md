@@ -55,6 +55,7 @@ Optional clean build:
 Outputs:
 
 - App folder: `dist\SonarMixer\`
+- Portable: `dist\SonarMixer-Portable-<version>.zip`
 - Installer: `dist\SonarMixer-Setup-<version>.exe`
 
 ## CLI Utilities

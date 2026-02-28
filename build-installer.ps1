@@ -15,6 +15,7 @@ if (-not (Test-Path $venvPython)) {
 if ($Clean) {
     Remove-Item -Recurse -Force "$root\build" -ErrorAction SilentlyContinue
     Remove-Item -Recurse -Force "$root\dist\SonarMixer" -ErrorAction SilentlyContinue
+    Remove-Item -Force "$root\dist\SonarMixer-Portable-$Version.zip" -ErrorAction SilentlyContinue
 }
 
 Write-Host "Installing/Updating build dependencies..."
@@ -30,6 +31,14 @@ Write-Host "Building executable with PyInstaller..."
     --collect-all PySide6 `
     --collect-all steelseries_sonar_py `
     "$root\app.py" | Out-Host
+
+$portableZip = Join-Path $root "dist\SonarMixer-Portable-$Version.zip"
+if (Test-Path $portableZip) {
+    Remove-Item -Force $portableZip
+}
+
+Write-Host "Building portable zip..."
+Compress-Archive -Path "$root\dist\SonarMixer\*" -DestinationPath $portableZip -CompressionLevel Optimal
 
 $isccCandidates = @(
     "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe",
@@ -47,4 +56,5 @@ Write-Host "Building installer with Inno Setup..."
 Write-Host ""
 Write-Host "Done."
 Write-Host "Folder build output: $root\dist\SonarMixer"
+Write-Host "Portable output:     $root\dist\SonarMixer-Portable-$Version.zip"
 Write-Host "Installer output:    $root\dist\SonarMixer-Setup-$Version.exe"
