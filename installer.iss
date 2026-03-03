@@ -1,9 +1,12 @@
 #define MyAppName "Sonar Mixer"
 #ifndef MyAppVersion
-  #define MyAppVersion "0.1.0"
+  #define MyAppVersion "0.1.1"
 #endif
 #define MyAppPublisher "Sonar Mixer Contributors"
 #define MyAppExeName "SonarMixer.exe"
+#ifndef MyAppSourceDir
+  #define MyAppSourceDir "dist\\SonarMixer"
+#endif
 
 [Setup]
 AppId={{8C790526-52D9-4A37-9D1A-98BCE79A8F3A}
@@ -29,7 +32,7 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional icons:"
 
 [Files]
-Source: "dist\SonarMixer\*"; DestDir: "{app}"; Flags: recursesubdirs ignoreversion
+Source: "{#MyAppSourceDir}\*"; DestDir: "{app}"; Flags: recursesubdirs ignoreversion
 
 [Icons]
 Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"

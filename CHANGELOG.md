@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog and this project follows Semantic Versioning.
 
+## [0.1.1] - 2026-03-03
+
+### Added
+- Shared `SOURCE` selector in flyout for linked Sonar output mode (when game/chat/media share one stream).
+- Tray menu toggle: `Show logs` to control visibility of the flyout status/log line.
+
+### Changed
+- Narrowed flyout `MASTER` strip width for better overall space usage.
+- Improved shared source naming format for more readable device labels.
+
 ## [0.1.0] - 2026-02-28
 
 ### Added

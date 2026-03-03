@@ -49,15 +49,19 @@ class SonarControlApplication:
         self._volume_job_lock = threading.Lock()
         self._app_activity_lock = threading.Lock()
         self._app_last_active: dict[str, float] = {}
+        self._show_logs = False
         self._alive = True
 
         self._tray = TrayController(
             on_toggle=self.toggle_window,
             on_refresh=self.refresh_channels,
+            on_toggle_logs=self.toggle_logs_visibility,
+            show_logs=self._show_logs,
             on_toggle_startup=self.toggle_startup_with_windows,
             startup_enabled=is_startup_enabled(),
             on_exit=self.exit_app,
         )
+        self._window.set_logs_visible(self._show_logs)
         self._window.hide()
 
     def run(self) -> None:
@@ -186,12 +190,43 @@ class SonarControlApplication:
         threading.Thread(target=work, daemon=True).start()
 
     def _apply_device_selections(self, selections: dict[str, DeviceSelection | None]) -> None:
+        stream_to_channels: dict[str, list[str]] = {}
+        for key in self.SWITCHABLE_CHANNELS:
+            selection = selections.get(key)
+            if not selection:
+                continue
+            stream_to_channels.setdefault(selection.stream_id, []).append(key)
+
         for key, selection in selections.items():
             if selection is None:
                 self._window.set_device_choices(key, [], None)
                 continue
             options = [(opt.id, opt.name) for opt in selection.options]
-            self._window.set_device_choices(key, options, selection.current_device_id)
+            linked = stream_to_channels.get(selection.stream_id, [])
+            reason: str | None = None
+            if len(linked) > 1:
+                reason = f"Source linked in Sonar ({selection.stream_id}); channels move together."
+            self._window.set_device_choices(
+                key,
+                options,
+                selection.current_device_id,
+                editable=True,
+                disabled_reason=reason,
+                linked=len(linked) > 1,
+            )
+
+        shared_channels = [key for key in ("game", "chatRender", "media") if selections.get(key) is not None]
+        shared_stream_ids = {selections[key].stream_id for key in shared_channels if selections.get(key) is not None}
+        if len(shared_channels) == 3 and len(shared_stream_ids) == 1:
+            base = selections.get("game")
+            if base is not None:
+                self._window.set_shared_device_choices(
+                    options=[(opt.id, opt.name) for opt in base.options],
+                    current_device_id=base.current_device_id,
+                    channel_key="game",
+                )
+                return
+        self._window.set_shared_device_choices([], None, channel_key="game")
 
     def route_app_beta(self, session_id: str, target_role: str) -> None:
         def work() -> None:
@@ -234,6 +269,10 @@ class SonarControlApplication:
                 self._window.dispatch(lambda: self._tray.set_startup_checked(is_startup_enabled()))
 
         threading.Thread(target=work, daemon=True).start()
+
+    def toggle_logs_visibility(self, enabled: bool) -> None:
+        self._show_logs = bool(enabled)
+        self._window.dispatch(lambda: self._window.set_logs_visible(self._show_logs))
 
     def exit_app(self) -> None:
         if not self._alive:

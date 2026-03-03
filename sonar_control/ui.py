@@ -525,7 +525,14 @@ class ChannelCard(QFrame):
         self._mute_button.setText("MUTED" if muted else "LIVE")
         self._mute_button.blockSignals(False)
 
-    def set_device_choices(self, options: list[tuple[str, str]], current_device_id: str | None) -> None:
+    def set_device_choices(
+        self,
+        options: list[tuple[str, str]],
+        current_device_id: str | None,
+        editable: bool = True,
+        disabled_reason: str | None = None,
+        linked: bool = False,
+    ) -> None:
         if self._channel_key not in self.SWITCHABLE_CHANNELS:
             return
 
@@ -547,8 +554,16 @@ class ChannelCard(QFrame):
                 self._device_combo.addItems(labels)
             selected = next((name for dev_id, name in options if dev_id == current_device_id), labels[0])
             self._device_combo.setCurrentText(selected)
-            self._device_combo.setToolTip(selected)
-            self._device_combo.setEnabled(True)
+            if editable:
+                tip = selected
+                if disabled_reason:
+                    tip = f"{selected}\n{disabled_reason}"
+                self._device_combo.setToolTip(tip)
+                self._device_combo.setEnabled(True)
+            else:
+                reason = disabled_reason or "Source linked in Sonar. Change from another channel."
+                self._device_combo.setToolTip(f"{selected}\n{reason}")
+                self._device_combo.setEnabled(False)
         self._device_combo.blockSignals(False)
 
     def _on_slider_change(self, value: int) -> None:
@@ -593,11 +608,16 @@ class FlyoutChannelStrip(QFrame):
         self._on_device_select = on_device_select
         self._on_route_app = on_route_app
         self._display_to_device_id: dict[str, str] = {}
+        self._shared_output_mode = False
 
         self.setObjectName("flyoutStrip")
         self.setFrameShape(QFrame.Shape.NoFrame)
-        self.setMinimumWidth(150)
-        self.setMaximumWidth(172)
+        if channel.key == "master":
+            self.setMinimumWidth(128)
+            self.setMaximumWidth(146)
+        else:
+            self.setMinimumWidth(150)
+            self.setMaximumWidth(172)
         self.setFixedHeight(432)
 
         body = QVBoxLayout(self)
@@ -673,7 +693,14 @@ class FlyoutChannelStrip(QFrame):
         self._mute_button.setText("MUTE" if muted else "LIVE")
         self._mute_button.blockSignals(False)
 
-    def set_device_choices(self, options: list[tuple[str, str]], current_device_id: str | None) -> None:
+    def set_device_choices(
+        self,
+        options: list[tuple[str, str]],
+        current_device_id: str | None,
+        editable: bool = True,
+        disabled_reason: str | None = None,
+        linked: bool = False,
+    ) -> None:
         if self._channel_key not in self.SWITCHABLE_CHANNELS:
             return
         self._display_to_device_id = {name: dev_id for dev_id, name in options}
@@ -688,8 +715,16 @@ class FlyoutChannelStrip(QFrame):
             self._device_combo.addItems(labels)
             selected = next((name for dev_id, name in options if dev_id == current_device_id), labels[0])
             self._device_combo.setCurrentText(selected)
-            self._device_combo.setToolTip(selected)
-            self._device_combo.setEnabled(True)
+            if editable:
+                tip = selected
+                if disabled_reason:
+                    tip = f"{selected}\n{disabled_reason}"
+                self._device_combo.setToolTip(tip)
+                self._device_combo.setEnabled(True)
+            else:
+                reason = disabled_reason or "Source linked in Sonar. Change from another channel."
+                self._device_combo.setToolTip(f"{selected}\n{reason}")
+                self._device_combo.setEnabled(False)
         self._device_combo.blockSignals(False)
 
     def set_assigned_apps(self, apps: list[tuple[str, str]]) -> None:
@@ -721,6 +756,12 @@ class FlyoutChannelStrip(QFrame):
         self._slider.setMinimumHeight(120)
         self._slider.setMaximumHeight(170)
 
+    def set_shared_output_mode(self, enabled: bool) -> None:
+        self._shared_output_mode = bool(enabled)
+        if self._channel_key not in self.SWITCHABLE_CHANNELS:
+            return
+        self._device_combo.setVisible(not self._shared_output_mode)
+
 
 class FlyoutMixerWindow(QWidget):
     def __init__(
@@ -748,6 +789,8 @@ class FlyoutMixerWindow(QWidget):
         self._cards: dict[str, FlyoutChannelStrip] = {}
         self._channel_apps: dict[str, list[tuple[str, str]]] = {"game": [], "chatRender": [], "media": []}
         self._pid_label: dict[str, str] = {}
+        self._shared_display_to_device_id: dict[str, str] = {}
+        self._shared_source_channel_key = "game"
         self._dispatcher = _UiDispatcher()
         self._outside_filter_installed = False
 
@@ -765,6 +808,22 @@ class FlyoutMixerWindow(QWidget):
         panel_layout.setContentsMargins(8, 8, 8, 8)
         panel_layout.setSpacing(6)
 
+        self._shared_row = QWidget()
+        self._shared_row.setObjectName("sharedSourceRow")
+        shared_layout = QHBoxLayout(self._shared_row)
+        shared_layout.setContentsMargins(2, 0, 2, 0)
+        shared_layout.setSpacing(6)
+        self._shared_label = QLabel("SOURCE")
+        self._shared_label.setObjectName("sharedSourceLabel")
+        self._shared_combo = QComboBox()
+        self._shared_combo.setObjectName("deviceCombo")
+        self._shared_combo.setMinimumWidth(300)
+        self._shared_combo.currentTextChanged.connect(self._on_shared_device_changed)
+        shared_layout.addWidget(self._shared_label)
+        shared_layout.addWidget(self._shared_combo, 1)
+        self._shared_row.hide()
+        panel_layout.addWidget(self._shared_row)
+
         cards_host = QWidget()
         self._cards_layout = QHBoxLayout(cards_host)
         self._cards_layout.setContentsMargins(0, 0, 0, 0)
@@ -776,6 +835,7 @@ class FlyoutMixerWindow(QWidget):
         self._status_label.setObjectName("flyoutStatusLabel")
         self._status_label.setFont(QFont("Segoe UI", 8))
         panel_layout.addWidget(self._status_label)
+        self._status_label.hide()
         root.addWidget(self._panel)
 
         shadow = QGraphicsDropShadowEffect(self)
@@ -796,6 +856,24 @@ class FlyoutMixerWindow(QWidget):
                 background-color: rgba(34, 39, 48, 210);
                 border: 1px solid rgba(70, 78, 92, 170);
                 border-radius: 10px;
+            }}
+            QWidget#sharedSourceRow {{
+                background: transparent;
+            }}
+            QLabel#sharedSourceLabel {{
+                color: {Theme.TEXT_MUTED};
+                font-size: 9px;
+                font-weight: 700;
+                letter-spacing: 1px;
+                padding-left: 2px;
+            }}
+            QComboBox#deviceCombo {{
+                background-color: rgba(35, 41, 51, 220);
+                border: 1px solid rgba(86, 95, 112, 190);
+                border-radius: 6px;
+                color: {Theme.TEXT};
+                min-height: 24px;
+                padding: 0 8px;
             }}
             QLabel#flyoutCardTitle {{
                 color: {Theme.TEXT};
@@ -932,10 +1010,81 @@ class FlyoutMixerWindow(QWidget):
             self._cards_layout.addWidget(card, 1)
             self._cards[channel.key] = card
 
-    def set_device_choices(self, channel_key: str, options: list[tuple[str, str]], current_device_id: str | None) -> None:
+    def set_device_choices(
+        self,
+        channel_key: str,
+        options: list[tuple[str, str]],
+        current_device_id: str | None,
+        editable: bool = True,
+        disabled_reason: str | None = None,
+        linked: bool = False,
+    ) -> None:
         card = self._cards.get(channel_key)
         if card:
-            card.set_device_choices(options, current_device_id)
+            card.set_device_choices(
+                options,
+                current_device_id,
+                editable=editable,
+                disabled_reason=disabled_reason,
+                linked=linked,
+            )
+
+    def set_shared_device_choices(
+        self,
+        options: list[tuple[str, str]],
+        current_device_id: str | None,
+        channel_key: str = "game",
+    ) -> None:
+        self._shared_source_channel_key = channel_key
+        if not options:
+            self._shared_display_to_device_id.clear()
+            self._shared_combo.blockSignals(True)
+            self._shared_combo.clear()
+            self._shared_combo.blockSignals(False)
+            self._shared_row.hide()
+            for card in self._cards.values():
+                card.set_shared_output_mode(False)
+            return
+
+        normalized = [(dev_id, self._format_source_name(name)) for dev_id, name in options]
+        self._shared_display_to_device_id = {name: dev_id for dev_id, name in normalized}
+        labels = [name for _, name in normalized]
+        selected = next((name for dev_id, name in normalized if dev_id == current_device_id), labels[0])
+        self._shared_combo.blockSignals(True)
+        self._shared_combo.clear()
+        self._shared_combo.addItems(labels)
+        self._shared_combo.setCurrentText(selected)
+        self._shared_combo.setToolTip(selected)
+        self._shared_combo.setEnabled(True)
+        self._shared_combo.blockSignals(False)
+        self._shared_row.show()
+        for card in self._cards.values():
+            card.set_shared_output_mode(True)
+
+    def _on_shared_device_changed(self, text: str) -> None:
+        self._shared_combo.setToolTip(text)
+        device_id = self._shared_display_to_device_id.get(text)
+        if device_id:
+            self._on_device_select(self._shared_source_channel_key, device_id)
+
+    @staticmethod
+    def _format_source_name(name: str) -> str:
+        text = " ".join(str(name).replace("_", " ").split())
+        if not text:
+            return name
+        if "(" in text and ")" in text:
+            return text
+        preserved = {"USB", "DAC", "HDMI", "SPDIF", "AUX", "BT", "TV", "PC"}
+        out: list[str] = []
+        for token in text.split(" "):
+            upper = token.upper()
+            if upper in preserved:
+                out.append(upper)
+            elif any(ch.isdigit() for ch in token):
+                out.append(token)
+            else:
+                out.append(token.capitalize())
+        return " ".join(out)
 
     def set_status(self, status: str) -> None:
         self._status_label.setText(status)
@@ -1071,7 +1220,7 @@ class ControlWindow(QMainWindow):
         self._channel_apps: dict[str, list[tuple[str, str]]] = {"game": [], "chatRender": [], "media": []}
         self._pid_label: dict[str, str] = {}
         self._last_channels: list[ChannelState] = []
-        self._device_cache: dict[str, tuple[list[tuple[str, str]], str | None]] = {}
+        self._device_cache: dict[str, tuple[list[tuple[str, str]], str | None, bool, str | None]] = {}
         self._force_rebuild = False
         self._dispatcher = _UiDispatcher()
 
@@ -1122,18 +1271,48 @@ class ControlWindow(QMainWindow):
         self._cards_layout.addStretch(1)
 
         # Re-apply cached device choices and channel apps after rebuild.
-        for key, (options, current) in self._device_cache.items():
-            self.set_device_choices(key, options, current)
+        for key, (options, current, linked, reason) in self._device_cache.items():
+            self.set_device_choices(key, options, current, linked=linked, disabled_reason=reason)
         self.set_channel_apps(self._channel_apps)
 
-    def set_device_choices(self, channel_key: str, options: list[tuple[str, str]], current_device_id: str | None) -> None:
-        self._device_cache[channel_key] = (list(options), current_device_id)
+    def set_device_choices(
+        self,
+        channel_key: str,
+        options: list[tuple[str, str]],
+        current_device_id: str | None,
+        editable: bool = True,
+        disabled_reason: str | None = None,
+        linked: bool = False,
+    ) -> None:
+        self._device_cache[channel_key] = (list(options), current_device_id, linked, disabled_reason)
         card = self._cards.get(channel_key)
         if card:
-            card.set_device_choices(options, current_device_id)
+            card.set_device_choices(
+                options,
+                current_device_id,
+                editable=editable,
+                disabled_reason=disabled_reason,
+                linked=linked,
+            )
+
+    def set_shared_device_choices(
+        self,
+        options: list[tuple[str, str]],
+        current_device_id: str | None,
+        channel_key: str = "game",
+    ) -> None:
+        _ = options
+        _ = current_device_id
+        _ = channel_key
 
     def set_status(self, status: str) -> None:
         self._status_label.setText(status)
+
+    def set_logs_visible(self, visible: bool) -> None:
+        _ = visible
+
+    def set_logs_visible(self, visible: bool) -> None:
+        self._status_label.setVisible(bool(visible))
 
     def set_app_sessions(self, sessions: list[tuple[str, str]]) -> None:
         self._pid_label = {pid: label for pid, label in sessions}

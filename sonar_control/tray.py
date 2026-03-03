@@ -15,6 +15,8 @@ class TrayController(QObject):
         self,
         on_toggle: Callable[[], None],
         on_refresh: Callable[[], None],
+        on_toggle_logs: Callable[[bool], None],
+        show_logs: bool,
         on_toggle_startup: Callable[[bool], None],
         startup_enabled: bool,
         on_exit: Callable[[], None],
@@ -22,6 +24,7 @@ class TrayController(QObject):
         super().__init__()
         self._on_toggle = on_toggle
         self._on_refresh = on_refresh
+        self._on_toggle_logs = on_toggle_logs
         self._on_toggle_startup = on_toggle_startup
         self._on_exit = on_exit
 
@@ -41,6 +44,12 @@ class TrayController(QObject):
         self._startup_action.setChecked(startup_enabled)
         self._startup_action.toggled.connect(self._on_toggle_startup)
         menu.addAction(self._startup_action)
+
+        self._show_logs_action = QAction("Show logs", menu)
+        self._show_logs_action.setCheckable(True)
+        self._show_logs_action.setChecked(show_logs)
+        self._show_logs_action.toggled.connect(self._on_toggle_logs)
+        menu.addAction(self._show_logs_action)
 
         menu.addSeparator()
 
@@ -63,6 +72,11 @@ class TrayController(QObject):
         self._startup_action.blockSignals(True)
         self._startup_action.setChecked(enabled)
         self._startup_action.blockSignals(False)
+
+    def set_show_logs_checked(self, enabled: bool) -> None:
+        self._show_logs_action.blockSignals(True)
+        self._show_logs_action.setChecked(enabled)
+        self._show_logs_action.blockSignals(False)
 
     def _on_activated(self, reason: QSystemTrayIcon.ActivationReason) -> None:
         if reason == QSystemTrayIcon.ActivationReason.Trigger:
