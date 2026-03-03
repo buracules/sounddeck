@@ -1089,6 +1089,9 @@ class FlyoutMixerWindow(QWidget):
     def set_status(self, status: str) -> None:
         self._status_label.setText(status)
 
+    def set_logs_visible(self, visible: bool) -> None:
+        self._status_label.setVisible(bool(visible))
+
     def set_app_sessions(self, sessions: list[tuple[str, str]]) -> None:
         self._pid_label = {pid: label for pid, label in sessions}
 
