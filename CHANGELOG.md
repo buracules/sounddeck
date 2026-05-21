@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog and this project follows Semantic Versioning.
 
+## [0.1.5] - 2026-05-21
+
+### Added
+- Headset battery indicator in the SOURCE device selector.
+  - Reads SteelSeries Arctis headsets directly via HID (`0xb0` status command).
+  - Shows battery percentage next to the combo, color-coded: green ≥50 %, orange 25–49 %, red <25 %.
+  - Displays `⚡` prefix and charges while USB charging is detected.
+  - Battery is polled once each time the flyout window opens (background thread, ~120 ms).
+  - Label is hidden when a non-headset device is selected.
+
 ## [0.1.4] - 2026-05-21
 
 ### Added
