@@ -8,6 +8,7 @@ from time import monotonic
 from PySide6.QtWidgets import QApplication
 
 from .audio_levels import AudioLevelClient
+from .headset_battery import HeadsetBattery
 from .audio_routing import AudioRoutingClient
 from .config import AppConfig, config_file_path, load_config, save_config
 from .notifications import Notifier
@@ -38,6 +39,7 @@ class SonarControlApplication:
         self._api_switcher = SonarApiSwitcher()
         self._routing = AudioRoutingClient()
         self._levels = AudioLevelClient()
+        self._headset_battery = HeadsetBattery()
         self._qapp = QApplication.instance() or QApplication(sys.argv)
         self._load_bundled_fonts()
 
@@ -48,6 +50,7 @@ class SonarControlApplication:
             on_device_select=self.select_device,
             on_route_app=self.route_app_beta,
             on_customize_app=self.customize_app,
+            on_show=self._poll_battery_once,
         )
 
         self._pending_volume_jobs: dict[str, threading.Timer] = {}
@@ -99,6 +102,7 @@ class SonarControlApplication:
         self._tray.start()
         self.refresh_channels(show_toast=False)
         self._start_level_polling()
+        self._start_battery_polling()
         self._qapp.exec()
 
     def refresh_channels(self, show_toast: bool = False) -> None:
@@ -372,6 +376,23 @@ class SonarControlApplication:
         if not pids:
             return 0.0
         return max((by_pid.get(pid, 0.0) for pid in pids), default=0.0)
+
+    def _poll_battery_once(self) -> None:
+        if not self._headset_battery.available:
+            return
+        def work() -> None:
+            try:
+                info = self._headset_battery.read()
+                pct = info.percent if info else None
+                chg = info.charging if info else False
+                name = self._headset_battery.device_name
+                self._window.dispatch(lambda p=pct, c=chg, n=name: self._window.set_battery(p, c, n))
+            except Exception:
+                pass
+        threading.Thread(target=work, daemon=True).start()
+
+    def _start_battery_polling(self) -> None:
+        pass
 
     def toggle_logs_visibility(self, enabled: bool) -> None:
         self._show_logs = bool(enabled)

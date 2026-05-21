@@ -1305,6 +1305,7 @@ class FlyoutMixerWindow(QWidget):
         on_device_select: Callable[[str, str], None],
         on_route_app: Callable[[str, str], None],
         on_customize_app: Callable[[str, str | None, str | None], None] | None = None,
+        on_show: Callable[[], None] | None = None,
     ) -> None:
         super().__init__(None)
         self.setWindowTitle("Sonar Mixer Flyout")
@@ -1319,6 +1320,7 @@ class FlyoutMixerWindow(QWidget):
         self._on_device_select = on_device_select
         self._on_route_app = on_route_app
         self._on_customize_app = on_customize_app
+        self._on_show = on_show
 
         self._cards: dict[str, FlyoutChannelStrip] = {}
         self._channel_apps: dict[str, list[tuple[str, str]]] = {"game": [], "chatRender": [], "media": []}
@@ -1336,6 +1338,8 @@ class FlyoutMixerWindow(QWidget):
     def showEvent(self, event) -> None:  # type: ignore[override]
         super().showEvent(event)
         _enable_windows_blur(int(self.winId()))
+        if self._on_show:
+            self._on_show()
 
     def _build_ui(self) -> None:
         root = QVBoxLayout(self)
@@ -1363,8 +1367,12 @@ class FlyoutMixerWindow(QWidget):
         self._shared_combo.setObjectName("deviceCombo")
         self._shared_combo.setMinimumWidth(220)
         self._shared_combo.currentTextChanged.connect(self._on_shared_device_changed)
+        self._shared_battery_label = QLabel("")
+        self._shared_battery_label.setObjectName("sharedBatteryLabel")
+        self._shared_battery_label.hide()
         shared_layout.addWidget(self._shared_label)
         shared_layout.addWidget(self._shared_combo, 1)
+        shared_layout.addWidget(self._shared_battery_label)
         self._shared_row.hide()
         panel_layout.addWidget(self._shared_row)
 
@@ -1729,12 +1737,14 @@ class FlyoutMixerWindow(QWidget):
         self._shared_combo.setEnabled(True)
         self._shared_combo.blockSignals(False)
         self._shared_row.show()
+        self._update_shared_battery()
         for card in self._cards.values():
             card.set_shared_output_mode(True)
         self._apply_window_height()
 
     def _on_shared_device_changed(self, text: str) -> None:
         self._shared_combo.setToolTip(text)
+        self._update_shared_battery()
         device_id = self._shared_display_to_device_id.get(text)
         if device_id:
             self._on_device_select(self._shared_source_channel_key, device_id)
@@ -1987,6 +1997,35 @@ class FlyoutMixerWindow(QWidget):
         status_extra = 20 if self._status_label.isVisible() else 0
         hud_extra = (20 + 6 + 18 + 6) if self._cyber_mode else 0
         self.setFixedHeight(36 + extra + rows_h + status_extra + hud_extra)
+
+    def set_battery(self, percent: int | None, charging: bool = False, headset_name: str = "") -> None:
+        self._last_battery = (percent, charging, headset_name)
+        self._update_shared_battery()
+
+    def _update_shared_battery(self) -> None:
+        percent, charging, headset_name = getattr(self, "_last_battery", (None, False, ""))
+        selected = self._shared_combo.currentText()
+        # Show only when the selected device matches the headset
+        matches = headset_name and any(
+            w in selected.lower()
+            for w in headset_name.lower().split()
+            if len(w) > 3
+        )
+        if not matches or percent is None or self._shared_row.isHidden():
+            self._shared_battery_label.hide()
+            return
+        text = f"⚡ {percent}%" if charging else f"{percent}%"
+        if percent < 25:
+            color = "#ff4d4d"
+        elif percent < 50:
+            color = "#ffaa33"
+        else:
+            color = "#48efaa"
+        self._shared_battery_label.setText(text)
+        self._shared_battery_label.setStyleSheet(
+            f"font-size: 10px; font-weight: 600; color: {color};"
+        )
+        self._shared_battery_label.show()
 
     def set_logs_visible(self, visible: bool) -> None:
         self._status_label.setVisible(bool(visible))
