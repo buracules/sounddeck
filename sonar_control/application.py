@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 import sys
-import subprocess
 import threading
 from datetime import datetime
 from time import monotonic
 
 from PySide6.QtWidgets import QApplication
 
+from .audio_levels import AudioLevelClient
 from .audio_routing import AudioRoutingClient
 from .config import AppConfig, config_file_path, load_config, save_config
 from .notifications import Notifier
@@ -15,7 +15,7 @@ from .sonar_api_switcher import DeviceSelection, SonarApiSwitcher
 from .sonar_client import SonarClient
 from .startup import is_startup_enabled, set_startup_enabled
 from .tray import TrayController
-from .ui import FlyoutMixerWindow
+from .ui import FlyoutMixerWindow, SettingsWindow
 
 
 class SonarControlApplication:
@@ -31,11 +31,15 @@ class SonarControlApplication:
 
     def __init__(self, compact_mode: bool = True) -> None:
         self._config: AppConfig = load_config()
+        self._compact_mode = bool(getattr(self._config, "compact_mode", compact_mode))
+        self._cyber_mode = bool(getattr(self._config, "cyber_mode", False))
         self._notifier = Notifier()
         self._client = SonarClient()
         self._api_switcher = SonarApiSwitcher()
         self._routing = AudioRoutingClient()
+        self._levels = AudioLevelClient()
         self._qapp = QApplication.instance() or QApplication(sys.argv)
+        self._load_bundled_fonts()
 
         self._window = FlyoutMixerWindow(
             on_refresh=self.refresh_channels,
@@ -43,30 +47,58 @@ class SonarControlApplication:
             on_toggle_mute=self.toggle_mute,
             on_device_select=self.select_device,
             on_route_app=self.route_app_beta,
+            on_customize_app=self.customize_app,
         )
 
         self._pending_volume_jobs: dict[str, threading.Timer] = {}
         self._volume_job_lock = threading.Lock()
         self._app_activity_lock = threading.Lock()
         self._app_last_active: dict[str, float] = {}
+        self._level_lock = threading.Lock()
+        self._channel_level_pids: dict[str, list[int]] = {"game": [], "chatRender": [], "media": []}
         self._show_logs = False
         self._alive = True
+        self._settings = SettingsWindow(
+            on_toggle_startup=self.toggle_startup_with_windows,
+            on_toggle_compact=self.toggle_compact_mode,
+            on_toggle_logs=self.toggle_logs_visibility,
+            config_path=str(config_file_path()),
+            on_toggle_cyber=self.toggle_cyber_mode,
+        )
 
         self._tray = TrayController(
             on_toggle=self.toggle_window,
             on_refresh=self.refresh_channels,
+            on_settings=self.show_settings,
+            on_toggle_compact=self.toggle_compact_mode,
+            compact_mode=self._compact_mode,
             on_toggle_logs=self.toggle_logs_visibility,
             show_logs=self._show_logs,
             on_toggle_startup=self.toggle_startup_with_windows,
             startup_enabled=is_startup_enabled(),
             on_exit=self.exit_app,
+            on_toggle_cyber=self.toggle_cyber_mode,
+            cyber_mode=self._cyber_mode,
         )
+        self._window.set_compact(self._compact_mode)
         self._window.set_logs_visible(self._show_logs)
+        if self._cyber_mode:
+            self._window.set_cyber_mode(True)
         self._window.hide()
+        self._settings.set_states(is_startup_enabled(), self._compact_mode, self._show_logs, self._cyber_mode)
+
+    @staticmethod
+    def _load_bundled_fonts() -> None:
+        from pathlib import Path
+        from PySide6.QtGui import QFontDatabase
+        assets = Path(__file__).resolve().parent / "assets"
+        for ttf in assets.glob("*.ttf"):
+            QFontDatabase.addApplicationFont(str(ttf))
 
     def run(self) -> None:
         self._tray.start()
         self.refresh_channels(show_toast=False)
+        self._start_level_polling()
         self._qapp.exec()
 
     def refresh_channels(self, show_toast: bool = False) -> None:
@@ -80,8 +112,8 @@ class SonarControlApplication:
                     except Exception:
                         selections[key] = None
                 sessions = self._routing.list_sessions()
-                channel_apps: dict[str, list[tuple[str, str]]] = {"game": [], "chatRender": [], "media": []}
-                best_by_app: dict[str, tuple[int, str, str, str]] = {}
+                channel_apps: dict[str, list[tuple[str, str, str, str]]] = {"game": [], "chatRender": [], "media": []}
+                best_by_app: dict[str, tuple[int, str, str, str, str, str]] = {}
                 pid_label: dict[str, str] = {}
                 now = monotonic()
                 for s in sessions:
@@ -92,10 +124,11 @@ class SonarControlApplication:
                     if s.state.strip().lower() == "expired":
                         continue
                     pid = str(s.process_id)
-                    app_label = self._alias_app_label(s.process_name, s.display_name, s.process_id)
-                    app_key = app_label.lower()
+                    app_key = self._app_identity(s.process_name, s.display_name, s.process_id)
                     if not app_key:
                         continue
+                    default_label = self._alias_app_label(s.process_name, s.display_name, s.process_id)
+                    app_label, app_color = self._apply_app_override(app_key, default_label)
                     state_key = s.state.strip().lower()
                     with self._app_activity_lock:
                         if state_key == "active":
@@ -107,15 +140,20 @@ class SonarControlApplication:
                     rank = self._session_rank(s.state, s.role)
                     current = best_by_app.get(app_key)
                     if current is None or rank > current[0]:
-                        best_by_app[app_key] = (rank, pid, app_label, s.role)
+                        best_by_app[app_key] = (rank, pid, app_label, s.role, app_key, app_color)
 
                 with self._app_activity_lock:
                     cutoff = now - (self.INACTIVE_RETENTION_SECONDS * 10)
                     self._app_last_active = {k: t for k, t in self._app_last_active.items() if t >= cutoff}
 
-                for _, pid, app_label, role in sorted(best_by_app.values(), key=lambda v: v[2].lower()):
-                    channel_apps[role].append((pid, app_label))
+                for _, pid, app_label, role, app_key, app_color in sorted(best_by_app.values(), key=lambda v: v[2].lower()):
+                    channel_apps[role].append((pid, app_label, app_key, app_color))
                     pid_label[pid] = app_label
+                with self._level_lock:
+                    self._channel_level_pids = {
+                        role: [int(item[0]) for item in apps if str(item[0]).isdigit()]
+                        for role, apps in channel_apps.items()
+                    }
                 session_options = list(pid_label.items())
                 if self.DEBUG_LOGS:
                     self._log_channel_apps(channel_apps)
@@ -254,12 +292,17 @@ class SonarControlApplication:
     def _toggle_window_main(self) -> None:
         self._window.toggle_near(self._tray.geometry())
 
+    def show_settings(self) -> None:
+        self._window.dispatch(lambda: self._settings.set_states(is_startup_enabled(), self._compact_mode, self._show_logs, self._cyber_mode))
+        self._window.dispatch(self._settings.show_window)
+
     def toggle_startup_with_windows(self, enabled: bool) -> None:
         def work() -> None:
             try:
                 set_startup_enabled(enabled)
                 actual = is_startup_enabled()
                 self._window.dispatch(lambda: self._tray.set_startup_checked(actual))
+                self._window.dispatch(lambda: self._settings.set_states(actual, self._compact_mode, self._show_logs, self._cyber_mode))
                 state = "enabled" if actual else "disabled"
                 self._window.dispatch(lambda: self._window.set_status(self._status(f"startup {state}")))
                 self._notifier.show("Sonar", f"Start with Windows {state}")
@@ -267,12 +310,89 @@ class SonarControlApplication:
                 msg = f"Startup toggle error: {exc}"
                 self._window.dispatch(lambda m=msg: self._window.set_status(self._status(m)))
                 self._window.dispatch(lambda: self._tray.set_startup_checked(is_startup_enabled()))
+                self._window.dispatch(lambda: self._settings.set_states(is_startup_enabled(), self._compact_mode, self._show_logs, self._cyber_mode))
 
         threading.Thread(target=work, daemon=True).start()
+
+    def customize_app(self, app_key: str, name: str | None, color: str | None) -> None:
+        key = app_key.strip().lower()
+        if not key:
+            return
+        overrides = dict(self._config.app_overrides or {})
+        current = dict(overrides.get(key, {}))
+        if name is None and color is None:
+            overrides.pop(key, None)
+        else:
+            if name is not None:
+                cleaned = " ".join(name.strip().split())
+                if cleaned:
+                    current["name"] = cleaned
+                else:
+                    current.pop("name", None)
+            if color is not None:
+                cleaned_color = color.strip()
+                if cleaned_color:
+                    current["color"] = cleaned_color
+                else:
+                    current.pop("color", None)
+            if current:
+                overrides[key] = current
+            else:
+                overrides.pop(key, None)
+        self._config.app_overrides = overrides
+        save_config(self._config)
+        self.refresh_channels(show_toast=False)
+
+    def _start_level_polling(self) -> None:
+        if not self._levels.available:
+            return
+
+        def work() -> None:
+            while self._alive:
+                try:
+                    levels = self._levels.read_levels()
+                    by_pid = levels.by_pid or {}
+                    with self._level_lock:
+                        channel_pids = {k: list(v) for k, v in self._channel_level_pids.items()}
+                    channel_levels = {
+                        "master": levels.master,
+                        "game": self._aggregate_pid_levels(channel_pids.get("game", []), by_pid),
+                        "chatRender": self._aggregate_pid_levels(channel_pids.get("chatRender", []), by_pid),
+                        "media": self._aggregate_pid_levels(channel_pids.get("media", []), by_pid),
+                    }
+                    self._window.dispatch(lambda lv=channel_levels: self._window.set_channel_levels(lv))
+                except Exception:
+                    pass
+                threading.Event().wait(0.08)
+
+        threading.Thread(target=work, daemon=True).start()
+
+    @staticmethod
+    def _aggregate_pid_levels(pids: list[int], by_pid: dict[int, float]) -> float:
+        if not pids:
+            return 0.0
+        return max((by_pid.get(pid, 0.0) for pid in pids), default=0.0)
 
     def toggle_logs_visibility(self, enabled: bool) -> None:
         self._show_logs = bool(enabled)
         self._window.dispatch(lambda: self._window.set_logs_visible(self._show_logs))
+        self._tray.set_show_logs_checked(self._show_logs)
+        self._settings.set_states(is_startup_enabled(), self._compact_mode, self._show_logs, self._cyber_mode)
+
+    def toggle_compact_mode(self, enabled: bool) -> None:
+        self._compact_mode = bool(enabled)
+        self._window.dispatch(lambda: self._window.set_compact(self._compact_mode))
+        self._tray.set_compact_checked(self._compact_mode)
+        self._settings.set_states(is_startup_enabled(), self._compact_mode, self._show_logs, self._cyber_mode)
+        self._config.compact_mode = self._compact_mode
+        save_config(self._config)
+
+    def toggle_cyber_mode(self, enabled: bool) -> None:
+        self._cyber_mode = bool(enabled)
+        self._window.dispatch(lambda: self._window.set_cyber_mode(self._cyber_mode))
+        self._tray.set_cyber_checked(self._cyber_mode)
+        self._config.cyber_mode = self._cyber_mode
+        save_config(self._config)
 
     def exit_app(self) -> None:
         if not self._alive:
@@ -286,6 +406,7 @@ class SonarControlApplication:
                 self._pending_volume_jobs.clear()
             self._tray.stop()
             self._window.close()
+            self._settings.close()
             self._qapp.quit()
 
         self._window.dispatch(do_exit)
@@ -296,9 +417,9 @@ class SonarControlApplication:
         return f"[{now}] {message}"
 
     @staticmethod
-    def _log_channel_apps(channel_apps: dict[str, list[tuple[str, str]]]) -> None:
+    def _log_channel_apps(channel_apps: dict[str, list[tuple[str, ...]]]) -> None:
         def labels(role: str) -> str:
-            items = [label for _, label in channel_apps.get(role, [])]
+            items = [item[1] for item in channel_apps.get(role, []) if len(item) > 1]
             return ", ".join(items) if items else "-"
 
         print(
@@ -324,3 +445,19 @@ class SonarControlApplication:
         if key in cls.APP_ALIASES:
             return cls.APP_ALIASES[key]
         return raw
+
+    @staticmethod
+    def _app_identity(process_name: str, display_name: str, process_id: int) -> str:
+        raw = (process_name or display_name).strip()
+        if raw:
+            return raw.lower()
+        return f"pid:{process_id}"
+
+    def _apply_app_override(self, app_key: str, default_label: str) -> tuple[str, str]:
+        overrides = self._config.app_overrides or {}
+        override = overrides.get(app_key, {})
+        name = override.get("name") if isinstance(override, dict) else None
+        color = override.get("color") if isinstance(override, dict) else None
+        label = name.strip() if isinstance(name, str) and name.strip() else default_label
+        chip_color = color.strip() if isinstance(color, str) and color.strip() else ""
+        return label, chip_color

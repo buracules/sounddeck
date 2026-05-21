@@ -1,6 +1,6 @@
 #define MyAppName "Sonar Mixer"
 #ifndef MyAppVersion
-  #define MyAppVersion "0.1.1"
+  #define MyAppVersion "0.1.4"
 #endif
 #define MyAppPublisher "Sonar Mixer Contributors"
 #define MyAppExeName "SonarMixer.exe"

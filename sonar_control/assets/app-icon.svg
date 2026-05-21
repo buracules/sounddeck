@@ -1,25 +1,23 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
-  <!-- Use currentColor so you can tint in code; default looks white if you set color to white -->
-  <g fill="currentColor">
-    <!-- Left slider rail -->
-    <rect x="14" y="8" width="6" height="48" rx="3"></rect>
-    <!-- Left knob -->
-    <rect x="9" y="18" width="16" height="16" rx="6"></rect>
-    <rect x="12" y="22" width="10" height="2" rx="1" fill="none"></rect>
-    <rect x="12" y="28" width="10" height="2" rx="1" fill="none"></rect>
-
-    <!-- Middle slider rail -->
-    <rect x="29" y="8" width="6" height="48" rx="3"></rect>
-    <!-- Middle knob -->
-    <rect x="24" y="24" width="16" height="16" rx="6"></rect>
-    <rect x="27" y="28" width="10" height="2" rx="1" fill="none"></rect>
-    <rect x="27" y="34" width="10" height="2" rx="1" fill="none"></rect>
-
-    <!-- Right slider rail -->
-    <rect x="44" y="8" width="6" height="48" rx="3"></rect>
-    <!-- Right knob -->
-    <rect x="39" y="30" width="16" height="16" rx="6"></rect>
-    <rect x="42" y="34" width="10" height="2" rx="1" fill="none"></rect>
-    <rect x="42" y="40" width="10" height="2" rx="1" fill="none"></rect>
-  </g>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+  <defs>
+    <linearGradient id="knob-bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#222731"/>
+      <stop offset="100%" stop-color="#0f1219"/>
+    </linearGradient>
+    <radialGradient id="knob-face" cx="0.5" cy="0.35" r="0.7">
+      <stop offset="0%" stop-color="#393f4d"/>
+      <stop offset="100%" stop-color="#1a1d25"/>
+    </radialGradient>
+    <linearGradient id="knob-ring" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#ff8a9d"/>
+      <stop offset="100%" stop-color="#c54a64"/>
+    </linearGradient>
+  </defs>
+  <rect x="8" y="8" width="240" height="240" rx="56" fill="url(#knob-bg)"/>
+  <rect x="9" y="9" width="238" height="238" rx="55" fill="none" stroke="#ffffff" stroke-opacity="0.08" stroke-width="1"/>
+  <circle cx="128" cy="128" r="74" fill="none" stroke="#ffffff" stroke-opacity="0.09" stroke-width="8" stroke-dasharray="349 600" transform="rotate(135 128 128)" stroke-linecap="round"/>
+  <circle cx="128" cy="128" r="74" fill="none" stroke="url(#knob-ring)" stroke-width="8" stroke-dasharray="244 600" transform="rotate(135 128 128)" stroke-linecap="round"/>
+  <circle cx="128" cy="128" r="56" fill="url(#knob-face)" stroke="#000000" stroke-opacity="0.55" stroke-width="1"/>
+  <rect x="124" y="78" width="8" height="22" rx="3" fill="#ff6f86" transform="rotate(55 128 128)"/>
+  <ellipse cx="116" cy="110" rx="26" ry="14" fill="#ffffff" fill-opacity="0.08"/>
 </svg>

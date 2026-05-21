@@ -3,25 +3,30 @@ from __future__ import annotations
 from collections.abc import Callable
 from pathlib import Path
 import sys
+import ctypes
+from ctypes import wintypes
 
-from PySide6.QtCore import QEvent, QMimeData, QObject, QPoint, QRect, QSize, Qt, Signal
-from PySide6.QtGui import QColor, QDrag, QFont, QFontMetrics, QGuiApplication, QPainter, QPen, QPixmap, QIcon
+from PySide6.QtCore import QEvent, QMimeData, QObject, QPoint, QRect, QRectF, QSize, Qt, QTimer, Signal
+from PySide6.QtGui import QBrush, QColor, QCursor, QDrag, QFont, QFontMetrics, QGuiApplication, QLinearGradient, QPainter, QPainterPath, QPen, QPixmap, QIcon, QTransform
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
+    QCheckBox,
     QComboBox,
+    QDialog,
     QFrame,
     QGraphicsDropShadowEffect,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QListWidget,
     QListWidgetItem,
-    QMainWindow,
+    QMenu,
     QPushButton,
     QSlider,
+    QStackedWidget,
     QStyledItemDelegate,
     QStyle,
-    QStyleOptionComboBox,
     QVBoxLayout,
     QWidget,
     QSizePolicy,
@@ -31,21 +36,171 @@ from .models import ChannelState
 
 
 class Theme:
-    BG = "#0b0f14"
-    SURFACE = "#111722"
-    CARD = "#131922"
-    BORDER = "#1f2630"
-    TEXT = "#e8eef7"
-    TEXT_MUTED = "#9aa4b2"
-    ACCENT = "#ffd400"
-    TRACK = "#2a313d"
-    TRACK_HOVER = "#333d4b"
+    BG = "#111318"
+    SURFACE = "#1b1f26"
+    CARD = "#222833"
+    BORDER = "#3b4451"
+    TEXT = "#eff3fa"
+    TEXT_MUTED = "#aeb7c3"
+    ACCENT = "#ff6f86"
+    TRACK = "#343d4b"
+    TRACK_HOVER = "#404b5a"
+    PANEL_ALPHA = 92
 
     OUTER_PAD = 18
     CONTENT_MAX_WIDTH = 1260
     GAP_8 = 8
     GAP_16 = 16
     GAP_24 = 20
+
+    @classmethod
+    def refresh_from_system(cls) -> None:
+        # Keep fixed accent for screenshot-matched look.
+        _ = cls
+        return
+
+
+class CyberTheme:
+    PINK = "#ff2d8a"
+    CYAN = "#00f0ff"
+    YELLOW = "#fff033"
+    BG = "#070912"
+    PANEL_BG = "#0a0e1a"
+    TEXT = "#dffaff"
+    TEXT_DIM = "rgba(223,250,255,0.55)"
+    MONO = '"Rajdhani", "Cascadia Code", "Consolas", "Courier New", monospace'
+
+    @staticmethod
+    def chamfer_path(w: int, h: int, c: int = 10) -> QPainterPath:
+        path = QPainterPath()
+        path.moveTo(c, 0)
+        path.lineTo(w, 0)
+        path.lineTo(w, h - c)
+        path.lineTo(w - c, h)
+        path.lineTo(0, h)
+        path.lineTo(0, c)
+        path.closeSubpath()
+        return path
+
+    @staticmethod
+    def chamfer_all_path(w: int, h: int, c: int = 3) -> QPainterPath:
+        path = QPainterPath()
+        path.moveTo(c, 0)
+        path.lineTo(w - c, 0)
+        path.lineTo(w, c)
+        path.lineTo(w, h - c)
+        path.lineTo(w - c, h)
+        path.lineTo(c, h)
+        path.lineTo(0, h - c)
+        path.lineTo(0, c)
+        path.closeSubpath()
+        return path
+
+
+class _MixerPanel(QFrame):
+    def __init__(self) -> None:
+        super().__init__()
+        self.setObjectName("flyoutPanel")
+        self._cyber = False
+
+    def set_cyber(self, cyber: bool) -> None:
+        self._cyber = bool(cyber)
+        self.update()
+
+    def paintEvent(self, event) -> None:  # type: ignore[override]
+        if not self._cyber:
+            super().paintEvent(event)
+            return
+        w, h = self.width(), self.height()
+        cut = 12
+        outer = CyberTheme.chamfer_path(w, h, cut)
+        inner = QTransform().translate(1.5, 1.5).map(CyberTheme.chamfer_path(w - 3, h - 3, cut - 1))
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
+        try:
+            grad = QLinearGradient(0, 0, w, h)
+            grad.setColorAt(0.0, QColor(CyberTheme.CYAN))
+            grad.setColorAt(1.0, QColor(CyberTheme.PINK))
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QBrush(grad))
+            painter.drawPath(outer)
+            painter.setBrush(QColor(CyberTheme.BG))
+            painter.drawPath(inner)
+            # scanlines
+            scan = QColor(0, 240, 255, 7)
+            for y in range(2, h, 3):
+                painter.fillRect(QRectF(1.5, y, w - 3, 1), scan)
+            # grid dots
+            grid = QColor(0, 240, 255, 18)
+            for gy in range(12, h - 2, 24):
+                for gx in range(12, w - 2, 24):
+                    painter.fillRect(QRectF(gx, gy, 1, 1), grid)
+        finally:
+            painter.end()
+
+
+class _CyberHudTop(QWidget):
+    def __init__(self) -> None:
+        super().__init__()
+        self.setObjectName("cyberHudTop")
+        self.setFixedHeight(20)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(2, 0, 2, 0)
+        layout.setSpacing(6)
+        self._dot = QLabel("●")
+        self._dot.setObjectName("cyberHudDot")
+        layout.addWidget(self._dot)
+        rec = QLabel("REC")
+        rec.setObjectName("cyberHudRec")
+        layout.addWidget(rec)
+        title = QLabel("SONAR//MIX_v1")
+        title.setObjectName("cyberHudTitle")
+        layout.addWidget(title)
+        sep = QFrame()
+        sep.setFrameShape(QFrame.Shape.HLine)
+        sep.setObjectName("cyberHudSep")
+        layout.addWidget(sep, 1)
+        sys_ok = QLabel("SYS_OK")
+        sys_ok.setObjectName("cyberHudSysOk")
+        layout.addWidget(sys_ok)
+        bars = QLabel("▮▮▮")
+        bars.setObjectName("cyberHudBars")
+        layout.addWidget(bars)
+        self._blink_on = True
+        self._blink_timer = QTimer(self)
+        self._blink_timer.setInterval(560)
+        self._blink_timer.timeout.connect(self._tick_blink)
+        self._blink_timer.start()
+
+    def _tick_blink(self) -> None:
+        self._blink_on = not self._blink_on
+        self._dot.setStyleSheet(
+            "color: #ff2d8a;" if self._blink_on else "color: rgba(255, 45, 138, 55);"
+        )
+
+
+class _CyberHudBottom(QWidget):
+    def __init__(self) -> None:
+        super().__init__()
+        self.setObjectName("cyberHudBottom")
+        self.setFixedHeight(18)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(2, 0, 2, 0)
+        layout.setSpacing(5)
+        uplink = QLabel("UPLINK: 127.0.0.1")
+        uplink.setObjectName("cyberHudInfo")
+        layout.addWidget(uplink)
+        for _ in range(2):
+            d = QLabel("·")
+            d.setObjectName("cyberHudDim")
+            layout.addWidget(d)
+            info = QLabel("LAT: --ms" if _ == 0 else "CH: 04")
+            info.setObjectName("cyberHudInfo")
+            layout.addWidget(info)
+        layout.addStretch(1)
+        diamonds = QLabel("◆  ◆  ◆")
+        diamonds.setObjectName("cyberDiamonds")
+        layout.addWidget(diamonds)
 
 
 class _UiDispatcher(QObject):
@@ -60,133 +215,72 @@ class _UiDispatcher(QObject):
             callback()
 
 
-class ModernSlider(QSlider):
-    def __init__(self) -> None:
-        super().__init__(Qt.Orientation.Vertical)
-        self.setObjectName("modernSlider")
-        self.setRange(0, 100)
-        self.setSingleStep(1)
-        self.setPageStep(5)
-        self.setMinimumHeight(176)
-        self.setMaximumHeight(280)
-        self.setFixedWidth(44)
-        self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
-        self.setProperty("hovered", False)
-        self.setProperty("active", False)
-
-    def enterEvent(self, event) -> None:  # type: ignore[override]
-        self._set_state("hovered", True)
-        super().enterEvent(event)
-
-    def leaveEvent(self, event) -> None:  # type: ignore[override]
-        self._set_state("hovered", False)
-        self._set_state("active", False)
-        super().leaveEvent(event)
-
-    def mousePressEvent(self, event) -> None:  # type: ignore[override]
-        self._set_state("active", True)
-        super().mousePressEvent(event)
-
-    def mouseReleaseEvent(self, event) -> None:  # type: ignore[override]
-        self._set_state("active", False)
-        super().mouseReleaseEvent(event)
-
-    def _set_state(self, key: str, value: bool) -> None:
-        if self.property(key) == value:
-            return
-        self.setProperty(key, value)
-        self.style().unpolish(self)
-        self.style().polish(self)
-        self.update()
+class _AccentPolicy(ctypes.Structure):
+    _fields_ = [
+        ("AccentState", ctypes.c_int),
+        ("AccentFlags", ctypes.c_int),
+        ("GradientColor", ctypes.c_uint),
+        ("AnimationId", ctypes.c_int),
+    ]
 
 
-class IconDeviceCombo(QComboBox):
-    def __init__(self) -> None:
-        super().__init__()
-        self.setObjectName("deviceComboCompact")
-        self.setFixedWidth(34)
-        self.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
-        self.setMinimumContentsLength(1)
-        self.setIconSize(QSize(16, 16))
-        self._source_icon = self.build_source_icon()
+class _WindowCompositionAttribData(ctypes.Structure):
+    _fields_ = [
+        ("Attribute", ctypes.c_int),
+        ("Data", ctypes.c_void_p),
+        ("SizeOfData", ctypes.c_size_t),
+    ]
 
-    def showPopup(self) -> None:  # type: ignore[override]
-        metrics = QFontMetrics(self.font())
-        longest = 0
-        for i in range(self.count()):
-            longest = max(longest, metrics.horizontalAdvance(self.itemText(i)))
-        # Ensure popup shows full output names even with icon-only collapsed control.
-        popup_width = max(280, longest + 56)
-        if self.view() is not None:
-            self.view().setMinimumWidth(popup_width)
-        super().showPopup()
 
-    def source_icon(self) -> QIcon:
-        return self._source_icon
-
-    def paintEvent(self, event) -> None:  # type: ignore[override]
-        opt = QStyleOptionComboBox()
-        self.initStyleOption(opt)
-        opt.currentText = ""
-        opt.currentIcon = QIcon()
-        painter = QPainter(self)
-        try:
-            self.style().drawComplexControl(QStyle.ComplexControl.CC_ComboBox, opt, painter, self)
-            pm = self._source_icon.pixmap(14, 14)
-            # Force a consistent white glyph tint regardless of source SVG color.
-            tinted = QPixmap(pm.size())
-            tinted.fill(Qt.GlobalColor.transparent)
-            tp = QPainter(tinted)
-            try:
-                tp.drawPixmap(0, 0, pm)
-                tp.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceIn)
-                tp.fillRect(tinted.rect(), QColor("#e8eef7"))
-            finally:
-                tp.end()
-            x = (self.width() - pm.width()) // 2
-            y = (self.height() - pm.height()) // 2
-            painter.drawPixmap(max(0, x), max(0, y), tinted)
-        finally:
-            painter.end()
-
-    @staticmethod
-    def build_source_icon() -> QIcon:
-        candidates = [Path(__file__).resolve().parent / "assets" / "sound-source.svg"]
-        meipass = getattr(sys, "_MEIPASS", None)
-        if meipass:
-            candidates.append(Path(str(meipass)) / "sonar_control" / "assets" / "sound-source.svg")
-
-        for svg_path in candidates:
-            if svg_path.exists():
-                icon = QIcon(str(svg_path))
-                if not icon.isNull():
-                    return icon
-
-        size = 18
-        px = QPixmap(size, size)
-        px.fill(Qt.GlobalColor.transparent)
-        p = QPainter(px)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-        try:
-            c = QColor("#d7deea")
-            p.setPen(Qt.PenStyle.NoPen)
-            p.setBrush(c)
-            p.drawRoundedRect(3, 7, 4, 4, 1.5, 1.5)
-            p.drawPolygon([QPoint(7, 7), QPoint(10, 5), QPoint(10, 13), QPoint(7, 11)])
-            pen = QPen(c, 1.4)
-            p.setPen(pen)
-            p.drawArc(9, 5, 6, 8, -35 * 16, 70 * 16)
-            p.drawArc(10, 3, 8, 12, -35 * 16, 70 * 16)
-        finally:
-            p.end()
-        return QIcon(px)
+def _enable_windows_blur(hwnd: int) -> None:
+    # Best-effort native blur; safely no-op on unsupported environments.
+    try:
+        user32 = ctypes.windll.user32
+        policy = _AccentPolicy()
+        policy.AccentState = 4  # ACCENT_ENABLE_ACRYLICBLURBEHIND
+        policy.AccentFlags = 2
+        policy.GradientColor = 0x401E1F22
+        data = _WindowCompositionAttribData()
+        data.Attribute = 19  # WCA_ACCENT_POLICY
+        data.Data = ctypes.cast(ctypes.pointer(policy), ctypes.c_void_p)
+        data.SizeOfData = ctypes.sizeof(policy)
+        user32.SetWindowCompositionAttribute(wintypes.HWND(hwnd), ctypes.byref(data))
+    except Exception:
+        return
+    # Clip blur to rounded corners (Win11+, safely no-ops on older Windows)
+    try:
+        DWMWA_WINDOW_CORNER_PREFERENCE = 33
+        DWMWCP_ROUND = ctypes.c_int(2)
+        ctypes.windll.dwmapi.DwmSetWindowAttribute(
+            wintypes.HWND(hwnd),
+            DWMWA_WINDOW_CORNER_PREFERENCE,
+            ctypes.byref(DWMWCP_ROUND),
+            ctypes.sizeof(DWMWCP_ROUND),
+        )
+    except Exception:
+        return
 
 
 class ChipListWidget(QListWidget):
-    def __init__(self, channel_key: str, on_route_app: Callable[[str, str], None]) -> None:
+    COLOR_PRESETS = (
+        ("Rose", "#ff6f86"),
+        ("Mint", "#48efaa"),
+        ("Sky", "#4cc2ff"),
+        ("Amber", "#ffb24a"),
+        ("Violet", "#b48cff"),
+        ("Gold", "#f0d35a"),
+    )
+
+    def __init__(
+        self,
+        channel_key: str,
+        on_route_app: Callable[[str, str], None],
+        on_customize_app: Callable[[str, str | None, str | None], None] | None = None,
+    ) -> None:
         super().__init__()
         self._channel_key = channel_key
         self._on_route_app = on_route_app
+        self._on_customize_app = on_customize_app
         self.setObjectName("channelChipList")
         self.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.setViewMode(QListWidget.ViewMode.IconMode)
@@ -194,14 +288,25 @@ class ChipListWidget(QListWidget):
         self.setWrapping(True)
         self.setResizeMode(QListWidget.ResizeMode.Adjust)
         self.setMovement(QListWidget.Movement.Static)
-        self.setSpacing(4)
+        self.setSpacing(3)
+        self.setUniformItemSizes(False)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.setDragEnabled(True)
         self.setAcceptDrops(True)
         self.setDragDropMode(QAbstractItemView.DragDropMode.DragDrop)
         self.setDefaultDropAction(Qt.DropAction.CopyAction)
-        self.setItemDelegate(AppChipDelegate(self))
+        self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.customContextMenuRequested.connect(self._show_chip_menu)
+        self._delegate = AppChipDelegate(self)
+        self.setItemDelegate(self._delegate)
+        self._is_cyber = False
+
+    def set_cyber(self, cyber: bool) -> None:
+        self._is_cyber = bool(cyber)
+        self._delegate.set_cyber(cyber)
+        self._reflow_chip_widths()
+        self.viewport().update()
 
     def mousePressEvent(self, event) -> None:  # type: ignore[override]
         if event.button() == Qt.MouseButton.LeftButton:
@@ -210,7 +315,7 @@ class ChipListWidget(QListWidget):
                 self.setCurrentItem(hit)
         super().mousePressEvent(event)
 
-    def set_apps(self, apps: list[tuple[str, str]]) -> None:
+    def set_apps(self, apps: list[tuple[str, ...]]) -> None:
         self.clear()
         if not apps:
             item = QListWidgetItem("No apps routed")
@@ -222,10 +327,16 @@ class ChipListWidget(QListWidget):
             self._reflow_chip_widths()
             return
 
-        for process_id, label in apps:
+        for app in apps:
+            process_id = str(app[0]) if len(app) > 0 else ""
+            label = str(app[1]) if len(app) > 1 else process_id
+            app_key = str(app[2]) if len(app) > 2 else label.lower()
+            custom_color = str(app[3]) if len(app) > 3 else ""
             item = QListWidgetItem(label)
             item.setData(Qt.ItemDataRole.UserRole, process_id)
-            bg, border = self._chip_colors(label)
+            item.setData(Qt.ItemDataRole.UserRole + 4, app_key)
+            item.setData(Qt.ItemDataRole.UserRole + 5, custom_color)
+            bg, border = self._chip_colors(label, custom_color)
             item.setData(Qt.ItemDataRole.UserRole + 1, bg)
             item.setData(Qt.ItemDataRole.UserRole + 2, border)
             item.setSizeHint(self._chip_size_hint(label))
@@ -273,12 +384,183 @@ class ChipListWidget(QListWidget):
             return
         event.ignore()
 
+    def _show_chip_menu(self, pos: QPoint) -> None:
+        if self._on_customize_app is None:
+            return
+        item = self.itemAt(pos)
+        if item is None or bool(item.data(Qt.ItemDataRole.UserRole + 3)):
+            return
+        app_key = str(item.data(Qt.ItemDataRole.UserRole + 4) or "").strip()
+        if not app_key:
+            return
+
+        menu = QMenu(self)
+        rename_action = menu.addAction("Rename")
+        color_menu = menu.addMenu("Color")
+        color_actions = []
+        for name, color in self.COLOR_PRESETS:
+            action = color_menu.addAction(self._color_icon(color), name)
+            action.setData(color)
+            color_actions.append(action)
+        custom_color_action = color_menu.addAction("Custom...")
+        reset_color_action = color_menu.addAction("Reset color")
+        reset_action = menu.addAction("Reset name and color")
+
+        chosen = menu.exec(self.viewport().mapToGlobal(pos))
+        if chosen is None:
+            return
+        if chosen == rename_action:
+            current_name = item.text()
+            value, ok = self._prompt_text("Rename app", "Name", current_name)
+            if ok:
+                self._on_customize_app(app_key, value, None)
+            return
+        if chosen == custom_color_action:
+            current = str(item.data(Qt.ItemDataRole.UserRole + 5) or Theme.ACCENT)
+            value, ok = self._prompt_text("Chip color", "Hex color", current)
+            if ok:
+                color = QColor(value.strip())
+                if color.isValid():
+                    self._on_customize_app(app_key, None, color.name())
+            return
+        if chosen == reset_color_action:
+            self._on_customize_app(app_key, None, "")
+            return
+        if chosen == reset_action:
+            self._on_customize_app(app_key, None, None)
+            return
+        if chosen in color_actions:
+            self._on_customize_app(app_key, None, str(chosen.data()))
+
+    def _prompt_text(self, title: str, label: str, value: str) -> tuple[str, bool]:
+        dialog = QDialog(self.window())
+        dialog.setWindowTitle(title)
+        dialog.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Tool)
+        dialog.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        dialog.setModal(True)
+
+        shell = QFrame(dialog)
+        shell.setObjectName("chipEditor")
+        layout = QVBoxLayout(shell)
+        layout.setContentsMargins(14, 12, 14, 12)
+        layout.setSpacing(8)
+
+        title_label = QLabel(title)
+        title_label.setObjectName("chipEditorTitle")
+        layout.addWidget(title_label)
+
+        input_label = QLabel(label)
+        input_label.setObjectName("chipEditorLabel")
+        layout.addWidget(input_label)
+
+        edit = QLineEdit(value)
+        edit.setObjectName("chipEditorInput")
+        edit.selectAll()
+        layout.addWidget(edit)
+
+        buttons = QWidget()
+        row = QHBoxLayout(buttons)
+        row.setContentsMargins(0, 4, 0, 0)
+        row.setSpacing(6)
+        row.addStretch(1)
+        cancel = QPushButton("Cancel")
+        cancel.setObjectName("chipEditorButton")
+        ok = QPushButton("Save")
+        ok.setObjectName("chipEditorPrimary")
+        row.addWidget(cancel)
+        row.addWidget(ok)
+        layout.addWidget(buttons)
+
+        root = QVBoxLayout(dialog)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.addWidget(shell)
+        dialog.setStyleSheet(
+            f"""
+            QFrame#chipEditor {{
+                background-color: #141820;
+                border: 1px solid rgba(255, 255, 255, 28);
+                border-radius: 10px;
+            }}
+            QLabel#chipEditorTitle {{
+                color: {Theme.TEXT};
+                font-size: 13px;
+                font-weight: 600;
+            }}
+            QLabel#chipEditorLabel {{
+                color: {Theme.TEXT_MUTED};
+                font-size: 10px;
+            }}
+            QLineEdit#chipEditorInput {{
+                background-color: rgba(255, 255, 255, 12);
+                border: 1px solid rgba(255, 255, 255, 26);
+                border-radius: 6px;
+                color: {Theme.TEXT};
+                min-height: 28px;
+                padding: 0 8px;
+                selection-background-color: {Theme.ACCENT};
+                selection-color: #111318;
+            }}
+            QPushButton#chipEditorButton,
+            QPushButton#chipEditorPrimary {{
+                border-radius: 6px;
+                min-height: 26px;
+                padding: 0 12px;
+                font-weight: 600;
+            }}
+            QPushButton#chipEditorButton {{
+                background-color: rgba(255, 255, 255, 10);
+                border: 1px solid rgba(255, 255, 255, 18);
+                color: {Theme.TEXT_MUTED};
+            }}
+            QPushButton#chipEditorPrimary {{
+                background-color: {Theme.ACCENT};
+                border: 1px solid {Theme.ACCENT};
+                color: #111318;
+            }}
+            """
+        )
+
+        result: dict[str, object] = {"ok": False}
+        ok.clicked.connect(lambda: (result.__setitem__("ok", True), dialog.accept()))
+        cancel.clicked.connect(dialog.reject)
+        edit.returnPressed.connect(lambda: (result.__setitem__("ok", True), dialog.accept()))
+
+        dialog.setFixedSize(280, 156)
+        parent_rect = self.window().frameGeometry() if self.window() is not None else self.frameGeometry()
+        dialog.move(parent_rect.center() - QPoint(dialog.width() // 2, dialog.height() // 2))
+        accepted = dialog.exec() == QDialog.DialogCode.Accepted and bool(result["ok"])
+        return edit.text(), accepted
+
+    @staticmethod
+    def _color_icon(color: str) -> QIcon:
+        px = QPixmap(16, 16)
+        px.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(px)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        try:
+            painter.setPen(QPen(QColor(255, 255, 255, 60), 1))
+            painter.setBrush(QColor(color))
+            painter.drawRoundedRect(QRectF(2, 2, 12, 12), 3, 3)
+        finally:
+            painter.end()
+        return QIcon(px)
+
     def _chip_size_hint(self, label: str) -> QSize:
-        metrics = QFontMetrics(QFont("Segoe UI", 9))
-        text_w = metrics.horizontalAdvance(label.strip())
-        max_w = max(64, self.viewport().width() - 8)
-        width = min(max_w, max(40, text_w + 18))
-        return QSize(width, 24)
+        if self._is_cyber:
+            for fname in ("Rajdhani", "Cascadia Code", "Consolas", "Courier New"):
+                f = QFont(fname, 9)
+                m = QFontMetrics(f)
+                if m.averageCharWidth() > 3:
+                    break
+            text_w = m.horizontalAdvance(label.strip().upper())
+            max_w = max(64, self.viewport().width() - 10)
+            width = min(max_w, max(48, text_w + 16))
+        else:
+            m = QFontMetrics(QFont("Segoe UI", 9))
+            text_w = m.horizontalAdvance(label.strip())
+            max_w = max(56, self.viewport().width() - 10)
+            width = min(max_w, max(34, text_w + 14))
+        return QSize(width, 18)
 
     def _reflow_chip_widths(self) -> None:
         for i in range(self.count()):
@@ -288,25 +570,79 @@ class ChipListWidget(QListWidget):
             item.setSizeHint(self._chip_size_hint(item.text()))
 
     @staticmethod
-    def _chip_colors(label: str) -> tuple[QColor, QColor]:
+    def _chip_colors(label: str, custom_color: str = "") -> tuple[QColor, QColor]:
+        if custom_color:
+            color = QColor(custom_color)
+            if color.isValid():
+                bg = color.darker(170)
+                bg.setAlpha(180)
+                border = color.lighter(120)
+                border.setAlpha(210)
+                return bg, border
         # Deterministic muted color per app name.
         seed = 0
         for ch in label.lower():
             seed = (seed * 131 + ord(ch)) & 0xFFFFFFFF
         hue = seed % 360
-        bg = QColor.fromHsv(hue, 80, 55)
-        border = QColor.fromHsv(hue, 95, 80)
+        bg = QColor.fromHsv(hue, 48, 56)
+        bg.setAlpha(150)
+        border = QColor.fromHsv(hue, 58, 82)
+        border.setAlpha(180)
         return bg, border
 
 
 class AppChipDelegate(QStyledItemDelegate):
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self._cyber = False
+
+    def set_cyber(self, cyber: bool) -> None:
+        self._cyber = bool(cyber)
+
     def paint(self, painter: QPainter, option, index) -> None:  # type: ignore[override]
         text = str(index.data(Qt.ItemDataRole.DisplayRole) or "")
         is_empty = bool(index.data(Qt.ItemDataRole.UserRole + 3))
         if is_empty:
             painter.save()
-            painter.setPen(QColor("#9aa4b2"))
+            color = QColor(CyberTheme.CYAN) if self._cyber else QColor("#9aa4b2")
+            color.setAlpha(100)
+            painter.setPen(color)
+            if self._cyber:
+                font = painter.font()
+                font.setFamily("Cascadia Code, Consolas, Courier New")
+                font.setPointSize(7)
+                painter.setFont(font)
             painter.drawText(option.rect.adjusted(4, 0, -4, 0), Qt.AlignmentFlag.AlignCenter, text)
+            painter.restore()
+            return
+
+        if self._cyber:
+            rect = option.rect.adjusted(1, 2, -1, -2)
+            hover = bool(option.state & QStyle.StateFlag.State_MouseOver)
+            bg_color = QColor(0, 240, 255, 35 if hover else 15)
+            border_color = QColor(CyberTheme.CYAN)
+            border_color.setAlpha(160 if hover else 80)
+
+            painter.save()
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
+            chip_path = CyberTheme.chamfer_all_path(rect.width(), rect.height(), 3)
+            painter.translate(rect.topLeft())
+            painter.setPen(QPen(border_color, 1))
+            painter.setBrush(bg_color)
+            painter.drawPath(chip_path)
+
+            text_rect = QRect(5, 0, rect.width() - 10, rect.height())
+            font = painter.font()
+            font.setFamily("Rajdhani")
+            font.setPointSize(9)
+            font.setWeight(QFont.Weight.DemiBold)
+            painter.setFont(font)
+            tc = QColor(CyberTheme.CYAN)
+            tc.setAlpha(220 if hover else 180)
+            painter.setPen(tc)
+            upper = text.upper()
+            elided = painter.fontMetrics().elidedText(upper, Qt.TextElideMode.ElideRight, text_rect.width())
+            painter.drawText(text_rect, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, elided)
             painter.restore()
             return
 
@@ -316,7 +652,7 @@ class AppChipDelegate(QStyledItemDelegate):
         border_color = border if isinstance(border, QColor) else QColor("#2a3442")
 
         rect = option.rect.adjusted(1, 2, -1, -2)
-        radius = 10
+        radius = 5
         if option.state & QStyle.StateFlag.State_MouseOver:
             bg_color = bg_color.lighter(110)
             border_color = border_color.lighter(120)
@@ -329,7 +665,7 @@ class AppChipDelegate(QStyledItemDelegate):
         painter.setBrush(bg_color)
         painter.drawRoundedRect(rect, radius, radius)
 
-        text_rect = rect.adjusted(8, 0, -6, 0)
+        text_rect = rect.adjusted(6, 0, -6, 0)
         painter.setPen(QColor("#e8eef7"))
         elided = painter.fontMetrics().elidedText(text, Qt.TextElideMode.ElideRight, text_rect.width())
         painter.drawText(text_rect, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, elided)
@@ -337,11 +673,17 @@ class AppChipDelegate(QStyledItemDelegate):
 
 
 class ChipContainer(QFrame):
-    def __init__(self, channel_key: str, on_route_app: Callable[[str, str], None], height: int = 110) -> None:
+    def __init__(
+        self,
+        channel_key: str,
+        on_route_app: Callable[[str, str], None],
+        on_customize_app: Callable[[str, str | None, str | None], None] | None = None,
+        height: int = 110,
+    ) -> None:
         super().__init__()
         self._channel_key = channel_key
         self._on_route_app = on_route_app
-        self._apps: list[tuple[str, str]] = []
+        self._apps: list[tuple[str, ...]] = []
         self.setObjectName("chipContainer")
         self.setAcceptDrops(True)
 
@@ -349,14 +691,17 @@ class ChipContainer(QFrame):
         root.setContentsMargins(4, 2, 4, 4)
         root.setSpacing(0)
 
-        self._chips = ChipListWidget(channel_key, on_route_app)
+        self._chips = ChipListWidget(channel_key, on_route_app, on_customize_app)
         self._chips.setMinimumHeight(height)
         self._chips.setMaximumHeight(height)
         root.addWidget(self._chips)
 
-    def set_apps(self, apps: list[tuple[str, str]]) -> None:
+    def set_apps(self, apps: list[tuple[str, ...]]) -> None:
         self._apps = list(apps)
         self._chips.set_apps(self._apps)
+
+    def set_cyber(self, cyber: bool) -> None:
+        self._chips.set_cyber(cyber)
 
     def dragEnterEvent(self, event) -> None:  # type: ignore[override]
         if event.mimeData().text().strip().startswith("pid:"):
@@ -383,215 +728,168 @@ class ChipContainer(QFrame):
         event.ignore()
 
 
-class ChannelCard(QFrame):
-    SWITCHABLE_CHANNELS = {"game", "chatRender", "media"}
+class ConsoleSlider(QSlider):
+    def __init__(self) -> None:
+        super().__init__(Qt.Orientation.Horizontal)
+        self.setObjectName("consoleSlider")
+        self.setRange(0, 100)
+        self.setSingleStep(1)
+        self.setPageStep(5)
+        self.setFixedHeight(18)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.setProperty("hovered", False)
+        self.setProperty("active", False)
 
-    def __init__(
-        self,
-        channel: ChannelState,
-        on_volume_change: Callable[[str, int], None],
-        on_toggle_mute: Callable[[str], None],
-        on_toggle_all_mute: Callable[[], None],
-        on_device_select: Callable[[str, str], None],
-        on_route_app: Callable[[str, str], None],
-        on_refresh_all: Callable[[], None],
-        on_toggle_mode: Callable[[], None],
-        compact: bool = False,
-    ) -> None:
+    def enterEvent(self, event) -> None:  # type: ignore[override]
+        self._set_state("hovered", True)
+        super().enterEvent(event)
+
+    def leaveEvent(self, event) -> None:  # type: ignore[override]
+        self._set_state("hovered", False)
+        self._set_state("active", False)
+        super().leaveEvent(event)
+
+    def mousePressEvent(self, event) -> None:  # type: ignore[override]
+        self._set_state("active", True)
+        super().mousePressEvent(event)
+
+    def mouseReleaseEvent(self, event) -> None:  # type: ignore[override]
+        self._set_state("active", False)
+        super().mouseReleaseEvent(event)
+
+    def _set_state(self, key: str, value: bool) -> None:
+        if self.property(key) == value:
+            return
+        self.setProperty(key, value)
+        self.style().unpolish(self)
+        self.style().polish(self)
+        self.update()
+
+
+class ConsoleMuteSwitch(QPushButton):
+    def __init__(self) -> None:
         super().__init__()
-        self._channel_key = channel.key
-        self._on_volume_change = on_volume_change
-        self._on_toggle_mute = on_toggle_mute
-        self._on_toggle_all_mute = on_toggle_all_mute
-        self._on_device_select = on_device_select
-        self._on_route_app = on_route_app
-        self._on_refresh_all = on_refresh_all
-        self._on_toggle_mode = on_toggle_mode
-        self._compact = compact
-        self._master_refresh_button = channel.key == "master"
-        self._speaker_icon = self.style().standardIcon(QStyle.StandardPixmap.SP_MediaVolume)
-        self._display_to_device_id: dict[str, str] = {}
+        self.setObjectName("consoleMuteSwitch")
+        self.setAccessibleName("Mute toggle")
+        self.setCheckable(True)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setFixedSize(38, 24)
+        self.setText("")
+        self._cyber = False
 
-        self.setObjectName("channelCard")
-        self.setFrameShape(QFrame.Shape.NoFrame)
-        self.setMinimumWidth(150 if compact else 220)
-        self.setMaximumWidth(180 if compact else 250)
-        self.setMinimumHeight(320 if compact else 540)
-        self.setProperty("dropHover", False)
+    def set_cyber(self, cyber: bool) -> None:
+        self._cyber = bool(cyber)
+        self.update()
 
-        body = QVBoxLayout(self)
-        body.setContentsMargins(10 if compact else 14, 10 if compact else 14, 10 if compact else 14, 10 if compact else 14)
-        body.setSpacing(6 if compact else 8)
-
-        title = QLabel(channel.label.upper())
-        title.setObjectName("cardTitle")
-        title.setAlignment(Qt.AlignmentFlag.AlignHCenter)
-        body.addWidget(title)
-
-        self._device_combo = IconDeviceCombo() if compact else QComboBox()
-        if not compact:
-            self._device_combo.setObjectName("deviceCombo")
-        self._device_combo.currentTextChanged.connect(self._on_device_changed)
-        body.addWidget(self._device_combo)
-
-        self._value_label = QLabel(f"{channel.volume}%")
-        self._value_label.setObjectName("valueLabel")
-        self._value_label.setAlignment(Qt.AlignmentFlag.AlignHCenter)
-        body.addWidget(self._value_label)
-
-        fader_wrap = QFrame()
-        fader_wrap.setObjectName("faderWrap")
-        fader_layout = QVBoxLayout(fader_wrap)
-        fader_layout.setContentsMargins(0, 8, 0, 8)
-        fader_layout.setSpacing(0)
-        self._slider = ModernSlider()
-        if compact:
-            self._slider.setMinimumHeight(140)
-            self._slider.setMaximumHeight(180)
-        self._slider.setValue(channel.volume)
-        self._slider.valueChanged.connect(self._on_slider_change)
-        fader_layout.addWidget(self._slider, 0, Qt.AlignmentFlag.AlignHCenter)
-        body.addWidget(fader_wrap, 1)
-
-        apps_label = QLabel("CURRENT APPS")
-        apps_label.setObjectName("appsLabel")
-        apps_label.setAlignment(Qt.AlignmentFlag.AlignLeft)
-        body.addWidget(apps_label)
-
-        self._apps_list = ChipContainer(self._channel_key, self._on_route_app)
-        body.addWidget(self._apps_list)
-
-        self._mute_button = QPushButton()
-        self._mute_button.setObjectName("muteToggle")
-        self._mute_button.setCheckable(True)
-        self._mute_button.clicked.connect(self._on_mute_clicked)
-        body.addWidget(self._mute_button)
-
-        self._secondary_button = QPushButton()
-        self._secondary_button.setObjectName("ghostButton")
-        self._secondary_button.hide()
-        body.addWidget(self._secondary_button)
-
-        self._mode_button = QPushButton()
-        self._mode_button.setObjectName("ghostButton")
-        self._mode_button.hide()
-        body.addWidget(self._mode_button)
-
-        self.set_muted(channel.muted)
-        if compact:
-            apps_label.hide()
-            self._apps_list.hide()
-        if channel.key == "master":
-            self._device_combo.hide()
-            apps_label.hide()
-            self._apps_list.hide()
-            body.setStretchFactor(fader_wrap, 10 if compact else 12)
-            self._slider.setMinimumHeight(250 if compact else 420)
-            self._slider.setMaximumHeight(360 if compact else 640)
-            self._mute_button.setCheckable(False)
-            self._mute_button.setChecked(False)
-            self._mute_button.setText("REFRESH ALL")
-            self._mute_button.clicked.disconnect()
-            self._mute_button.clicked.connect(self._on_refresh_all)
-            self._mode_button.setText("FULL" if compact else "COMPACT")
-            self._mode_button.clicked.connect(self._on_toggle_mode)
-            self._mode_button.show()
-            if not compact:
-                self._secondary_button.setText("MUTE ALL")
-                self._secondary_button.clicked.connect(self._on_toggle_all_mute)
-                self._secondary_button.show()
-        elif channel.key not in self.SWITCHABLE_CHANNELS:
-            self._device_combo.setEnabled(False)
-            self._device_combo.addItem("Not routable")
-            self._apps_list.setEnabled(False)
-            self._apps_list.set_apps([("", "Not routable")])
+    def paintEvent(self, event) -> None:  # type: ignore[override]
+        _ = event
+        muted = self.isChecked()
+        if self._cyber:
+            accent = QColor(CyberTheme.CYAN)
+            track = QColor(0, 240, 255, 28) if not muted else QColor(255, 255, 255, 18)
+            border = QColor(0, 240, 255, 130) if not muted else QColor(255, 255, 255, 34)
+            knob = accent if not muted else QColor("#1a1f2e")
         else:
-            self._device_combo.setEnabled(False)
-            self._device_combo.addItem("Loading devices...")
-            self._apps_list.set_apps([])
-            if compact:
-                self._mute_button.hide()
+            accent = QColor(Theme.ACCENT)
+            track = QColor(255, 111, 134, 34) if not muted else QColor(255, 255, 255, 18)
+            border = QColor(255, 111, 134, 150) if not muted else QColor(255, 255, 255, 34)
+            knob = accent if not muted else QColor("#3a3f4d")
 
-    def set_muted(self, muted: bool) -> None:
-        if self._master_refresh_button:
-            self._mute_button.blockSignals(True)
-            self._mute_button.setCheckable(False)
-            self._mute_button.setChecked(False)
-            self._mute_button.setText("REFRESH ALL")
-            self._mute_button.blockSignals(False)
-            return
-        self._mute_button.blockSignals(True)
-        self._mute_button.setChecked(muted)
-        self._mute_button.setText("MUTED" if muted else "LIVE")
-        self._mute_button.blockSignals(False)
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        try:
+            rect = QRectF(1, 1, self.width() - 2, self.height() - 2)
+            painter.setPen(QPen(border, 1))
+            painter.setBrush(track)
+            painter.drawRoundedRect(rect, 12, 12)
 
-    def set_device_choices(
-        self,
-        options: list[tuple[str, str]],
-        current_device_id: str | None,
-        editable: bool = True,
-        disabled_reason: str | None = None,
-        linked: bool = False,
-    ) -> None:
-        if self._channel_key not in self.SWITCHABLE_CHANNELS:
-            return
+            diameter = 16
+            x = 4 if muted else self.width() - diameter - 4
+            y = (self.height() - diameter) / 2
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(knob)
+            painter.drawEllipse(QRectF(x, y, diameter, diameter))
+        finally:
+            painter.end()
 
-        self._display_to_device_id = {name: dev_id for dev_id, name in options}
-        labels = list(self._display_to_device_id.keys())
 
-        self._device_combo.blockSignals(True)
-        self._device_combo.clear()
-        if not labels:
-            if self._compact:
-                self._device_combo.addItem("No active device")
-            else:
-                self._device_combo.addItem("No active device")
-            self._device_combo.setEnabled(False)
-        else:
-            if self._compact:
-                self._device_combo.addItems(labels)
-            else:
-                self._device_combo.addItems(labels)
-            selected = next((name for dev_id, name in options if dev_id == current_device_id), labels[0])
-            self._device_combo.setCurrentText(selected)
-            if editable:
-                tip = selected
-                if disabled_reason:
-                    tip = f"{selected}\n{disabled_reason}"
-                self._device_combo.setToolTip(tip)
-                self._device_combo.setEnabled(True)
-            else:
-                reason = disabled_reason or "Source linked in Sonar. Change from another channel."
-                self._device_combo.setToolTip(f"{selected}\n{reason}")
-                self._device_combo.setEnabled(False)
-        self._device_combo.blockSignals(False)
+class VUMeter(QWidget):
+    def __init__(self, bars: int = 18, master: bool = False) -> None:
+        super().__init__()
+        self._bars = bars
+        self._level = 0
+        self._display_level = 0
+        self._muted = False
+        self._master = master
+        self._cyber = False
+        self.setFixedHeight(6 if master else 5)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
 
-    def _on_slider_change(self, value: int) -> None:
-        self._value_label.setText(f"{value}%")
-        self._on_volume_change(self._channel_key, int(value))
+    def set_meter(self, level: int, muted: bool = False) -> None:
+        _ = level
+        self._muted = bool(muted)
+        self._level = 0
+        self._display_level = 0
+        self.update()
 
-    def _on_mute_clicked(self) -> None:
-        self._on_toggle_mute(self._channel_key)
+    def set_peak(self, level: float, muted: bool = False) -> None:
+        self._muted = bool(muted)
+        self._level = max(0, min(100, int(round(float(level) * 100))))
+        self._display_level = 0 if self._muted else self._level
+        self.update()
 
-    def _on_device_changed(self, text: str) -> None:
-        self._device_combo.setToolTip(text)
-        device_id = self._display_to_device_id.get(text)
-        if device_id:
-            self._on_device_select(self._channel_key, device_id)
+    def set_bars(self, bars: int) -> None:
+        self._bars = max(8, int(bars))
+        self.update()
 
-    def set_assigned_apps(self, apps: list[tuple[str, str]]) -> None:
-        self._apps_list.set_apps(apps)
+    def set_cyber(self, cyber: bool) -> None:
+        self._cyber = bool(cyber)
+        self.update()
 
-    def set_volume_value(self, value: int) -> None:
-        value = max(0, min(100, int(value)))
-        self._slider.blockSignals(True)
-        self._slider.setValue(value)
-        self._slider.blockSignals(False)
-        self._value_label.setText(f"{value}%")
+    def paintEvent(self, event) -> None:  # type: ignore[override]
+        _ = event
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        try:
+            gap = 2
+            if self._bars <= 0:
+                return
+            bar_w = max(1.0, (self.width() - gap * (self._bars - 1)) / self._bars)
+            filled = round((0 if self._muted else self._display_level) / 100 * self._bars)
+            for i in range(self._bars):
+                on = i < filled
+                hot = i >= self._bars - 3
+                warm = i >= self._bars - 6
+                if self._cyber:
+                    if not on:
+                        color = QColor(0, 240, 255, 22)
+                    elif hot:
+                        color = QColor(CyberTheme.PINK)
+                    elif warm:
+                        color = QColor(CyberTheme.YELLOW)
+                    else:
+                        color = QColor(CyberTheme.CYAN)
+                else:
+                    if not on:
+                        color = QColor(255, 255, 255, 16)
+                    elif hot:
+                        color = QColor("#ff5470")
+                    elif warm:
+                        color = QColor("#ffb24a")
+                    else:
+                        color = QColor("#48efaa")
+                painter.setPen(Qt.PenStyle.NoPen)
+                painter.setBrush(color)
+                x = i * (bar_w + gap)
+                painter.drawRoundedRect(QRectF(x, 0, bar_w, self.height()), 1.5, 1.5)
+        finally:
+            painter.end()
 
 
 class FlyoutChannelStrip(QFrame):
     SWITCHABLE_CHANNELS = {"game", "chatRender", "media"}
+    CHANNEL_INDEX = {"master": 0, "game": 1, "chatRender": 2, "media": 3}
+    CHANNEL_TAG = {"master": "CORE", "game": "GAME", "chatRender": "CHAT", "media": "MEDIA"}
 
     def __init__(
         self,
@@ -600,98 +898,155 @@ class FlyoutChannelStrip(QFrame):
         on_toggle_mute: Callable[[str], None],
         on_device_select: Callable[[str, str], None],
         on_route_app: Callable[[str, str], None],
+        on_customize_app: Callable[[str, str | None, str | None], None] | None = None,
     ) -> None:
         super().__init__()
         self._channel_key = channel.key
+        self._is_master = channel.key not in self.SWITCHABLE_CHANNELS
         self._on_volume_change = on_volume_change
         self._on_toggle_mute = on_toggle_mute
         self._on_device_select = on_device_select
         self._on_route_app = on_route_app
+        self._on_customize_app = on_customize_app
         self._display_to_device_id: dict[str, str] = {}
         self._shared_output_mode = False
+        self._compact = False
+        self._muted = bool(channel.muted)
+        self._assigned_apps: list[tuple[str, str]] = []
+        self._is_cyber = False
 
         self.setObjectName("flyoutStrip")
         self.setFrameShape(QFrame.Shape.NoFrame)
-        if channel.key == "master":
-            self.setMinimumWidth(128)
-            self.setMaximumWidth(146)
-        else:
-            self.setMinimumWidth(150)
-            self.setMaximumWidth(172)
-        self.setFixedHeight(432)
+        self.setProperty("master", self._is_master)
+        self.setProperty("muted", self._muted)
+        self.setAcceptDrops(True)
 
-        body = QVBoxLayout(self)
-        body.setContentsMargins(7, 8, 7, 4)
-        body.setSpacing(3)
+        body = QHBoxLayout(self)
+        body.setContentsMargins(10 if self._is_master else 9, 10 if self._is_master else 8, 10, 10 if self._is_master else 8)
+        body.setSpacing(10)
+        self._body = body
 
-        title = QLabel(channel.label.upper())
-        title.setObjectName("flyoutCardTitle")
-        title.setAlignment(Qt.AlignmentFlag.AlignHCenter)
-        body.addWidget(title)
+        self._accent_bar = QWidget()
+        self._accent_bar.setObjectName("consoleAccentBar")
+        self._accent_bar.setFixedWidth(3)
+        body.addWidget(self._accent_bar)
 
-        self._device_combo = IconDeviceCombo()
-        self._source_icon = self._device_combo.source_icon()
+        self._master_icon = QLabel()
+        self._master_icon.setObjectName("consoleMasterIcon")
+        self._master_icon.setFixedSize(32, 32)
+        self._master_icon.setPixmap(FlyoutChannelStrip._build_master_icon().pixmap(18, 18))
+        self._master_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        body.addWidget(self._master_icon)
+
+        self._mute_button = ConsoleMuteSwitch()
+        self._mute_button.clicked.connect(self._on_mute_clicked)
+        body.addWidget(self._mute_button, 0, Qt.AlignmentFlag.AlignVCenter)
+
+        label_col = QWidget()
+        self._label_col = label_col
+        label_layout = QVBoxLayout(label_col)
+        label_layout.setContentsMargins(0, 0, 0, 0)
+        label_layout.setSpacing(1)
+        label_col.setFixedWidth(86 if self._is_master else 96)
+
+        self._cyber_ch_label = QLabel()
+        self._cyber_ch_label.setObjectName("cyberChLabel")
+        self._cyber_ch_label.hide()
+        label_layout.addWidget(self._cyber_ch_label)
+
+        self._title_label = QLabel("Master" if self._is_master else channel.label)
+        self._title_label.setObjectName("flyoutCardTitle")
+        label_layout.addWidget(self._title_label)
+
+        self._device_combo = QComboBox()
+        self._device_combo.setObjectName("consoleDeviceCombo")
         self._device_combo.currentTextChanged.connect(self._on_device_changed)
-        body.addWidget(self._device_combo, 0, Qt.AlignmentFlag.AlignHCenter)
+        label_layout.addWidget(self._device_combo)
 
-        self._value_label = QLabel(f"{channel.volume}%")
-        self._value_label.setObjectName("flyoutValueLabel")
-        self._value_label.setAlignment(Qt.AlignmentFlag.AlignHCenter)
-        body.addWidget(self._value_label)
+        self._bus_label = QLabel("SYSTEM BUS")
+        self._bus_label.setObjectName("consoleBusLabel")
+        label_layout.addWidget(self._bus_label)
+        body.addWidget(label_col)
 
-        self._slider = ModernSlider()
-        self._slider.setMinimumHeight(176)
-        self._slider.setMaximumHeight(248)
-        self._slider.setProperty("master", channel.key not in self.SWITCHABLE_CHANNELS)
+        center = QWidget()
+        center_layout = QVBoxLayout(center)
+        center_layout.setContentsMargins(0, 0, 0, 0)
+        center_layout.setSpacing(3)
+
+        self._slider = ConsoleSlider()
+        self._slider.setProperty("master", self._is_master)
         self._slider.setValue(channel.volume)
         self._slider.valueChanged.connect(self._on_slider_change)
-        body.addWidget(self._slider, 1, Qt.AlignmentFlag.AlignHCenter)
-        body.setStretchFactor(self._slider, 1)
-        self._post_slider_gap = QWidget()
-        self._post_slider_gap.setFixedHeight(0)
-        body.addWidget(self._post_slider_gap)
+        center_layout.addWidget(self._slider)
 
-        self._apps_section = QWidget()
-        apps_layout = QVBoxLayout(self._apps_section)
-        apps_layout.setContentsMargins(2, 0, 2, 0)
-        apps_layout.setSpacing(0)
+        self._meter = VUMeter(bars=24 if self._is_master else 18, master=self._is_master)
+        center_layout.addWidget(self._meter)
 
-        self._apps_list = ChipContainer(self._channel_key, self._on_route_app, height=74)
-        self._apps_list.setMinimumHeight(66)
-        self._apps_list.setMaximumHeight(82)
-        apps_layout.addWidget(self._apps_list)
+        self._apps_section = ChipContainer(
+            self._channel_key,
+            self._on_route_app,
+            on_customize_app=self._on_customize_app,
+            height=28,
+        )
+        self._apps_section.setMinimumHeight(28)
+        self._apps_section.setMaximumHeight(34)
+        center_layout.addWidget(self._apps_section)
+        body.addWidget(center, 1)
 
-        body.addWidget(self._apps_section)
-        self._pre_button_gap = QWidget()
-        self._pre_button_gap.setFixedHeight(8)
-        body.addWidget(self._pre_button_gap)
-
-        self._mute_button = QPushButton()
-        self._mute_button.setObjectName("flyoutMuteButton")
-        self._mute_button.setCheckable(True)
-        self._mute_button.clicked.connect(self._on_mute_clicked)
-        body.addWidget(self._mute_button)
+        val_col = QWidget()
+        val_layout = QVBoxLayout(val_col)
+        val_layout.setContentsMargins(0, 0, 0, 0)
+        val_layout.setSpacing(0)
+        self._val_col = val_col
+        self._val_label_default_w = 48 if self._is_master else 42
+        self._value_label = QLabel(f"{channel.volume}%")
+        self._value_label.setObjectName("flyoutValueLabel")
+        self._value_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        self._value_label.setFixedWidth(self._val_label_default_w)
+        val_layout.addWidget(self._value_label)
+        self._hex_label = QLabel("")
+        self._hex_label.setObjectName("cyberHexLabel")
+        self._hex_label.setAlignment(Qt.AlignmentFlag.AlignRight)
+        self._hex_label.setFixedWidth(self._val_label_default_w)
+        self._hex_label.hide()
+        val_layout.addWidget(self._hex_label)
+        body.addWidget(val_col)
 
         self.set_muted(channel.muted)
-        if channel.key not in self.SWITCHABLE_CHANNELS:
-            body.setContentsMargins(7, 8, 7, 4)
+        if self._is_master:
+            self._mute_button.hide()
+            self._device_combo.setEnabled(False)
+            self._device_combo.clear()
             self._device_combo.hide()
-            self._apps_section.hide()
-            self._slider.setMinimumHeight(232)
-            self._slider.setMaximumHeight(380)
-            self._post_slider_gap.setFixedHeight(8)
-            self._pre_button_gap.setFixedHeight(0)
+            self._apps_section.setVisible(False)
+            self._bus_label.show()
         else:
-            self._post_slider_gap.setFixedHeight(6)
-            self._pre_button_gap.setFixedHeight(8)
+            self._accent_bar.hide()
+            self._master_icon.hide()
+            self._bus_label.hide()
             self._device_combo.setEnabled(False)
             self._device_combo.addItem("Loading")
+        self.set_compact(False)
 
     def set_muted(self, muted: bool) -> None:
+        self._muted = bool(muted)
+        self.setProperty("muted", self._muted)
+        self.style().unpolish(self)
+        self.style().polish(self)
         self._mute_button.blockSignals(True)
-        self._mute_button.setChecked(muted)
-        self._mute_button.setText("MUTE" if muted else "LIVE")
+        self._mute_button.setChecked(self._muted)
+        self._mute_button.setText("")
+        self._mute_button.setToolTip("Unmute" if self._muted else "Mute")
         self._mute_button.blockSignals(False)
+        self._meter.set_meter(self._meter_level(self._slider.value()), muted=self._muted and not self._is_master)
+        self._value_label.setProperty("muted", self._muted)
+        self._value_label.style().unpolish(self._value_label)
+        self._value_label.style().polish(self._value_label)
+        if self._is_cyber and not self._is_master:
+            v = self._slider.value()
+            self._hex_label.setText("MUTED" if self._muted else f"0x{v:02X}")
+            self._apply_cyber_glow()
+        self.update()
 
     def set_device_choices(
         self,
@@ -703,7 +1058,7 @@ class FlyoutChannelStrip(QFrame):
     ) -> None:
         if self._channel_key not in self.SWITCHABLE_CHANNELS:
             return
-        self._display_to_device_id = {name: dev_id for dev_id, name in options}
+        self._display_to_device_id = {self._format_device_name(name): dev_id for dev_id, name in options}
         labels = list(self._display_to_device_id.keys())
 
         self._device_combo.blockSignals(True)
@@ -713,7 +1068,7 @@ class FlyoutChannelStrip(QFrame):
             self._device_combo.setEnabled(False)
         else:
             self._device_combo.addItems(labels)
-            selected = next((name for dev_id, name in options if dev_id == current_device_id), labels[0])
+            selected = next((self._format_device_name(name) for dev_id, name in options if dev_id == current_device_id), labels[0])
             self._device_combo.setCurrentText(selected)
             if editable:
                 tip = selected
@@ -728,17 +1083,35 @@ class FlyoutChannelStrip(QFrame):
         self._device_combo.blockSignals(False)
 
     def set_assigned_apps(self, apps: list[tuple[str, str]]) -> None:
-        self._apps_list.set_apps(apps)
+        self._assigned_apps = list(apps)
+        self._apps_section.set_apps(self._assigned_apps[:3])
+        self._apps_section.setVisible(
+            (not self._compact) and (self._channel_key in self.SWITCHABLE_CHANNELS) and bool(self._assigned_apps)
+        )
+        self._apply_console_height()
 
     def set_volume_value(self, value: int) -> None:
         value = max(0, min(100, int(value)))
         self._slider.blockSignals(True)
         self._slider.setValue(value)
         self._slider.blockSignals(False)
-        self._value_label.setText(f"{value}%")
+        if self._is_cyber:
+            self._value_label.setText(str(value).zfill(3))
+            self._hex_label.setText("/100 dB" if self._is_master else f"0x{value:02X}")
+        else:
+            self._value_label.setText(f"{value}%")
+        self._meter.set_meter(self._meter_level(value), muted=self._muted and not self._is_master)
+
+    def set_audio_level(self, level: float) -> None:
+        self._meter.set_peak(level, muted=self._muted and not self._is_master)
 
     def _on_slider_change(self, value: int) -> None:
-        self._value_label.setText(f"{value}%")
+        if self._is_cyber:
+            self._value_label.setText(str(value).zfill(3))
+            self._hex_label.setText("/100 dB" if self._is_master else f"0x{value:02X}")
+        else:
+            self._value_label.setText(f"{value}%")
+        self._meter.set_meter(self._meter_level(value), muted=self._muted and not self._is_master)
         self._on_volume_change(self._channel_key, int(value))
 
     def _on_mute_clicked(self) -> None:
@@ -750,17 +1123,177 @@ class FlyoutChannelStrip(QFrame):
         if device_id:
             self._on_device_select(self._channel_key, device_id)
 
+    @staticmethod
+    def _build_master_icon() -> QIcon:
+        for svg_path in (
+            Path(__file__).resolve().parent / "assets" / "app-icon.svg",
+            Path(__file__).resolve().parent / "assets" / "app-icon.png",
+        ):
+            if svg_path.exists():
+                icon = QIcon(str(svg_path))
+                if not icon.isNull():
+                    return icon
+        return QApplication.style().standardIcon(QStyle.StandardPixmap.SP_MediaVolume)
+
+    def dragEnterEvent(self, event) -> None:  # type: ignore[override]
+        if self._channel_key in self.SWITCHABLE_CHANNELS and event.mimeData().text().strip().startswith("pid:"):
+            event.acceptProposedAction()
+            return
+        event.ignore()
+
+    def dragMoveEvent(self, event) -> None:  # type: ignore[override]
+        if self._channel_key in self.SWITCHABLE_CHANNELS and event.mimeData().text().strip().startswith("pid:"):
+            event.acceptProposedAction()
+            return
+        event.ignore()
+
+    def dropEvent(self, event) -> None:  # type: ignore[override]
+        text = event.mimeData().text().strip()
+        if self._channel_key not in self.SWITCHABLE_CHANNELS or not text.startswith("pid:"):
+            event.ignore()
+            return
+        process_id = text.split(":", 1)[1].strip()
+        if process_id:
+            self._on_route_app(process_id, self._channel_key)
+            event.acceptProposedAction()
+            return
+        event.ignore()
+
+    def set_cyber(self, cyber: bool) -> None:
+        self._is_cyber = bool(cyber)
+        self._meter.set_cyber(cyber)
+        self._mute_button.set_cyber(cyber)
+        self._apps_section.set_cyber(cyber)
+        idx = self.CHANNEL_INDEX.get(self._channel_key, 0)
+        self._cyber_ch_label.setText(f"[ CH.{idx:02d} ]")
+        self._cyber_ch_label.setVisible(cyber)
+        if self._is_master:
+            self._master_icon.setVisible(not cyber and not self._compact)
+        # Widen label column to fit the monospace CH tag
+        self._label_col.setFixedWidth((96 if self._is_master else 96) if cyber else (86 if self._is_master else 96))
+        v = self._slider.value()
+        cyber_w = 58 if self._is_master else 52
+        val_w = cyber_w if cyber else self._val_label_default_w
+        self._value_label.setFixedWidth(val_w)
+        self._hex_label.setFixedWidth(val_w)
+        if cyber:
+            self._value_label.setText(str(v).zfill(3))
+            self._hex_label.setText("/100 dB" if self._is_master else ("MUTED" if self._muted else f"0x{v:02X}"))
+            fs = "22px" if self._is_master else "17px"
+            self._value_label.setStyleSheet(f"font-size: {fs}; font-weight: 700; color: #ffffff;")
+            self._hex_label.setStyleSheet("font-size: 7px;")
+        else:
+            self._value_label.setText(f"{v}%")
+            self._value_label.setStyleSheet("")
+            self._hex_label.setStyleSheet("")
+        self._hex_label.setVisible(cyber)
+        self._apply_cyber_glow()
+        self._apply_console_height()
+        self.update()
+
+    def _apply_cyber_glow(self) -> None:
+        if not self._is_cyber:
+            self._value_label.setGraphicsEffect(None)
+            self._title_label.setGraphicsEffect(None)
+            return
+        val_color = CyberTheme.PINK if (self._is_master or self._muted) else CyberTheme.CYAN
+        val_radius = 14 if self._is_master else 10
+        title_color = CyberTheme.PINK if (self._is_master or self._muted) else CyberTheme.CYAN
+        for widget, color, radius in (
+            (self._value_label, val_color, val_radius),
+            (self._title_label, title_color, 8),
+        ):
+            fx = QGraphicsDropShadowEffect()
+            fx.setColor(QColor(color))
+            fx.setBlurRadius(radius)
+            fx.setOffset(0, 0)
+            widget.setGraphicsEffect(fx)
+
+    def paintEvent(self, event) -> None:  # type: ignore[override]
+        if not self._is_cyber:
+            super().paintEvent(event)
+            return
+        w, h = self.width(), self.height()
+        cut = 9 if self._is_master else 6
+        muted = self._muted
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
+        try:
+            path = CyberTheme.chamfer_path(w, h, cut)
+            if self._is_master:
+                bg = QColor(255, 45, 138, 15)
+            elif muted:
+                bg = QColor(255, 45, 138, 22)
+            else:
+                bg = QColor(0, 240, 255, 10)
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(bg)
+            painter.drawPath(path)
+            border_c = QColor(255, 45, 138, 85) if (self._is_master or muted) else QColor(0, 240, 255, 55)
+            painter.setPen(QPen(border_c, 1))
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawPath(QTransform().translate(0.5, 0.5).map(CyberTheme.chamfer_path(w - 1, h - 1, cut)))
+            if self._is_master:
+                painter.setPen(QPen(QColor(255, 45, 138, 200), 1.5))
+                s = 10
+                painter.drawLine(4, 4 + s, 4, 4)
+                painter.drawLine(4, 4, 4 + s, 4)
+                painter.drawLine(w - 4 - s, h - 4, w - 4, h - 4)
+                painter.drawLine(w - 4, h - 4, w - 4, h - 4 - s)
+        finally:
+            painter.end()
+
     def set_compact(self, compact: bool) -> None:
-        _ = compact
-        # Single flyout mode; keep stable geometry.
-        self._slider.setMinimumHeight(120)
-        self._slider.setMaximumHeight(170)
+        self._compact = bool(compact)
+        self.setMinimumWidth(0)
+        self.setMaximumWidth(16777215)
+        self._body.setContentsMargins(9 if self._compact else 10, 7 if self._compact else 10, 9, 7 if self._compact else 10)
+        self._meter.set_bars(18 if self._compact else (24 if self._is_master else 18))
+        show_details = (not self._compact) and (self._channel_key in self.SWITCHABLE_CHANNELS)
+        self._apps_section.setVisible(show_details and bool(self._assigned_apps))
+        if self._is_master:
+            self._accent_bar.setVisible(not self._compact)
+            self._master_icon.setVisible(not self._compact and not self._is_cyber)
+            self._mute_button.hide()
+            self._device_combo.hide()
+            self._bus_label.setVisible(not self._compact)
+        else:
+            self._mute_button.setVisible(not self._compact)
+            self._device_combo.setVisible((not self._compact) and (not self._shared_output_mode))
+        self._title_label.setStyleSheet("font-size: 12px;" if self._compact else "")
+        self._apply_console_height()
 
     def set_shared_output_mode(self, enabled: bool) -> None:
         self._shared_output_mode = bool(enabled)
         if self._channel_key not in self.SWITCHABLE_CHANNELS:
             return
-        self._device_combo.setVisible(not self._shared_output_mode)
+        self._device_combo.setVisible((not self._compact) and (not self._shared_output_mode))
+
+    def _meter_level(self, volume: int) -> int:
+        if self._is_master:
+            return min(95, int(volume) + 8)
+        seed = 0
+        for ch in f"{self._channel_key}{volume}":
+            seed = (seed * 131 + ord(ch)) & 0xFFFFFFFF
+        return int(((seed % 65) + 25) * (max(0, min(100, int(volume))) / 100))
+
+    def _apply_console_height(self) -> None:
+        if self._compact:
+            height = 72 if self._is_cyber else 58
+        elif self._is_master:
+            height = 92 if self._is_cyber else 78
+        elif self._assigned_apps:
+            height = 108 if self._is_cyber else 94
+        else:
+            height = 86 if self._is_cyber else 72
+        self.setFixedHeight(height)
+
+    @staticmethod
+    def _format_device_name(name: str) -> str:
+        text = str(name).strip()
+        if "(" in text:
+            text = text.split("(", 1)[0].strip()
+        return text or str(name)
 
 
 class FlyoutMixerWindow(QWidget):
@@ -771,42 +1304,52 @@ class FlyoutMixerWindow(QWidget):
         on_toggle_mute: Callable[[str], None],
         on_device_select: Callable[[str, str], None],
         on_route_app: Callable[[str, str], None],
+        on_customize_app: Callable[[str, str | None, str | None], None] | None = None,
     ) -> None:
         super().__init__(None)
         self.setWindowTitle("Sonar Mixer Flyout")
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Tool)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
-        self.setMinimumWidth(720)
-        self.setMaximumWidth(780)
+        self.setFixedWidth(500)
 
         self._on_refresh = on_refresh
         self._on_volume_change = on_volume_change
         self._on_toggle_mute = on_toggle_mute
         self._on_device_select = on_device_select
         self._on_route_app = on_route_app
+        self._on_customize_app = on_customize_app
 
         self._cards: dict[str, FlyoutChannelStrip] = {}
         self._channel_apps: dict[str, list[tuple[str, str]]] = {"game": [], "chatRender": [], "media": []}
         self._pid_label: dict[str, str] = {}
         self._shared_display_to_device_id: dict[str, str] = {}
         self._shared_source_channel_key = "game"
+        self._compact_mode = False
+        self._cyber_mode = False
         self._dispatcher = _UiDispatcher()
         self._outside_filter_installed = False
 
         self._build_ui()
         self._apply_theme()
 
+    def showEvent(self, event) -> None:  # type: ignore[override]
+        super().showEvent(event)
+        _enable_windows_blur(int(self.winId()))
+
     def _build_ui(self) -> None:
         root = QVBoxLayout(self)
         root.setContentsMargins(8, 8, 8, 8)
         root.setSpacing(0)
 
-        self._panel = QFrame()
-        self._panel.setObjectName("flyoutPanel")
+        self._panel = _MixerPanel()
         panel_layout = QVBoxLayout(self._panel)
-        panel_layout.setContentsMargins(8, 8, 8, 8)
+        panel_layout.setContentsMargins(10, 10, 10, 10)
         panel_layout.setSpacing(6)
+
+        self._hud_top = _CyberHudTop()
+        self._hud_top.hide()
+        panel_layout.addWidget(self._hud_top)
 
         self._shared_row = QWidget()
         self._shared_row.setObjectName("sharedSourceRow")
@@ -815,9 +1358,10 @@ class FlyoutMixerWindow(QWidget):
         shared_layout.setSpacing(6)
         self._shared_label = QLabel("SOURCE")
         self._shared_label.setObjectName("sharedSourceLabel")
+        self._shared_label.hide()
         self._shared_combo = QComboBox()
         self._shared_combo.setObjectName("deviceCombo")
-        self._shared_combo.setMinimumWidth(300)
+        self._shared_combo.setMinimumWidth(220)
         self._shared_combo.currentTextChanged.connect(self._on_shared_device_changed)
         shared_layout.addWidget(self._shared_label)
         shared_layout.addWidget(self._shared_combo, 1)
@@ -825,9 +1369,9 @@ class FlyoutMixerWindow(QWidget):
         panel_layout.addWidget(self._shared_row)
 
         cards_host = QWidget()
-        self._cards_layout = QHBoxLayout(cards_host)
+        self._cards_layout = QVBoxLayout(cards_host)
         self._cards_layout.setContentsMargins(0, 0, 0, 0)
-        self._cards_layout.setSpacing(6)
+        self._cards_layout.setSpacing(5)
         self._cards_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
         panel_layout.addWidget(cards_host)
 
@@ -836,56 +1380,90 @@ class FlyoutMixerWindow(QWidget):
         self._status_label.setFont(QFont("Segoe UI", 8))
         panel_layout.addWidget(self._status_label)
         self._status_label.hide()
+
+        self._hud_bottom = _CyberHudBottom()
+        self._hud_bottom.hide()
+        panel_layout.addWidget(self._hud_bottom)
+
         root.addWidget(self._panel)
 
-        shadow = QGraphicsDropShadowEffect(self)
-        shadow.setBlurRadius(28)
-        shadow.setOffset(0, 10)
-        shadow.setColor(QColor(0, 0, 0, 180))
-        self._panel.setGraphicsEffect(shadow)
 
     def _apply_theme(self) -> None:
+        Theme.refresh_from_system()
         self.setStyleSheet(
             f"""
+            QWidget {{
+                font-family: "Segoe UI Variable", "Segoe UI";
+            }}
             QFrame#flyoutPanel {{
-                background-color: rgba(20, 24, 30, 232);
-                border: 1px solid rgba(80, 90, 105, 150);
+                background-color: #10131b;
+                border: 1px solid rgba(255, 255, 255, 16);
                 border-radius: 14px;
             }}
             QFrame#flyoutStrip {{
-                background-color: rgba(34, 39, 48, 210);
-                border: 1px solid rgba(70, 78, 92, 170);
+                background-color: rgba(255, 255, 255, 7);
+                border: 1px solid rgba(255, 255, 255, 15);
+                border-radius: 8px;
+            }}
+            QFrame#flyoutStrip[master="true"] {{
+                background-color: rgba(255, 255, 255, 8);
                 border-radius: 10px;
+            }}
+            QFrame#flyoutStrip[muted="true"] {{
+                background-color: rgba(255, 111, 134, 20);
+                border: 1px solid rgba(255, 111, 134, 68);
+            }}
+            QWidget#consoleAccentBar {{
+                background-color: {Theme.ACCENT};
+                border-radius: 1px;
+            }}
+            QLabel#consoleMasterIcon {{
+                background-color: {Theme.ACCENT};
+                border-radius: 8px;
             }}
             QWidget#sharedSourceRow {{
                 background: transparent;
+                border: none;
             }}
             QLabel#sharedSourceLabel {{
                 color: {Theme.TEXT_MUTED};
-                font-size: 9px;
-                font-weight: 700;
-                letter-spacing: 1px;
-                padding-left: 2px;
+                font-size: 10px;
+                font-weight: 600;
+                letter-spacing: 0.4px;
+                padding-left: 4px;
             }}
             QComboBox#deviceCombo {{
-                background-color: rgba(35, 41, 51, 220);
-                border: 1px solid rgba(86, 95, 112, 190);
-                border-radius: 6px;
+                background-color: rgba(24, 29, 40, 238);
+                border: 1px solid rgba(255, 255, 255, 34);
+                border-radius: 8px;
                 color: {Theme.TEXT};
                 min-height: 24px;
-                padding: 0 8px;
+                padding: 0 10px;
+            }}
+            QComboBox#deviceCombo:hover {{
+                background-color: rgba(32, 38, 52, 245);
+            }}
+            QComboBox#deviceCombo::drop-down {{
+                width: 0px;
+                border: none;
+            }}
+            QComboBox#deviceCombo::down-arrow {{
+                image: none;
+                width: 0px;
+                height: 0px;
             }}
             QLabel#flyoutCardTitle {{
                 color: {Theme.TEXT};
-                font-size: 10px;
+                font-size: 12px;
                 font-weight: 600;
-                letter-spacing: 1px;
+                letter-spacing: 0.3px;
             }}
             QLabel#flyoutValueLabel {{
-                color: {Theme.ACCENT};
-                font-size: 18px;
-                font-weight: 700;
+                color: {Theme.TEXT};
+                font-size: 16px;
+                font-weight: 400;
             }}
+            QLabel#flyoutValueLabel[muted="true"] {{ color: {Theme.ACCENT}; }}
             QLabel#flyoutAppsLabel {{
                 color: {Theme.TEXT_MUTED};
                 font-size: 8px;
@@ -898,81 +1476,169 @@ class FlyoutMixerWindow(QWidget):
                 color: {Theme.TEXT_MUTED};
                 padding-left: 2px;
             }}
-            QPushButton#flyoutMuteButton {{
-                background-color: rgba(58, 64, 76, 232);
-                border: 1px solid rgba(98, 109, 128, 210);
-                border-radius: 6px;
-                color: {Theme.TEXT};
-                min-height: 24px;
+            QLabel#consoleBusLabel {{
+                color: rgba(238, 241, 247, 135);
                 font-size: 9px;
-                font-weight: 600;
+                letter-spacing: 0.6px;
             }}
-            QPushButton#flyoutMuteButton:hover {{
-                background-color: rgba(70, 76, 90, 236);
-                border: 1px solid rgba(118, 130, 151, 220);
+            QComboBox#consoleDeviceCombo {{
+                background-color: transparent;
+                border: none;
+                color: rgba(238, 241, 247, 135);
+                font-size: 9px;
+                padding: 0px 8px 0px 0px;
+                min-height: 14px;
+                max-height: 16px;
             }}
-            QPushButton#flyoutMuteButton:checked {{
-                background-color: {Theme.ACCENT};
-                border-color: {Theme.ACCENT};
-                color: #11151d;
-            }}
-            QComboBox#deviceComboCompact {{
-                background-color: rgba(35, 41, 51, 220);
-                border: 1px solid rgba(86, 95, 112, 190);
-                border-radius: 6px;
-                color: transparent;
-                min-height: 24px;
-                min-width: 34px;
-                max-width: 34px;
-                padding-left: 8px;
-                padding-right: 0px;
-            }}
-            QComboBox#deviceComboCompact::drop-down {{
+            QComboBox#consoleDeviceCombo::drop-down {{
                 width: 0px;
                 border: none;
             }}
-            QComboBox#deviceComboCompact::down-arrow {{
+            QComboBox#consoleDeviceCombo::down-arrow {{
                 image: none;
                 width: 0px;
                 height: 0px;
             }}
             QComboBox QAbstractItemView {{
-                background-color: #171c24;
-                border: 1px solid #2d3644;
+                background-color: rgb(20, 24, 34);
+                border: 1px solid rgba(255, 255, 255, 54);
+                border-radius: 10px;
                 color: {Theme.TEXT};
-                selection-background-color: #2a3342;
+                outline: none;
+                padding: 3px;
+                selection-background-color: rgba(255, 111, 134, 45);
                 selection-color: {Theme.TEXT};
             }}
-            QSlider#modernSlider {{
-                min-width: 34px;
-                max-width: 34px;
-                min-height: 176px;
-                max-height: 248px;
+            QComboBox QAbstractItemView::item {{
+                min-height: 30px;
+                padding: 0 10px;
+                border-radius: 6px;
             }}
-            QSlider#modernSlider[master="true"] {{
-                min-height: 232px;
-                max-height: 380px;
+            QComboBox QAbstractItemView::item:hover {{
+                background-color: rgba(255, 255, 255, 16);
             }}
-            QSlider#modernSlider::groove:vertical {{
-                background: #364152;
+            QComboBox QAbstractItemView::item:selected {{
+                background-color: rgba(255, 111, 134, 50);
+            }}
+            QSlider#consoleSlider {{
+                min-height: 18px;
+                max-height: 18px;
+            }}
+            QSlider#consoleSlider::groove:horizontal {{
+                background: rgba(255, 255, 255, 16);
+                height: 5px;
+                border-radius: 2px;
+            }}
+            QSlider#consoleSlider::sub-page:horizontal {{
+                background: {Theme.ACCENT};
+                border-radius: 2px;
+            }}
+            QSlider#consoleSlider[master="true"]::sub-page:horizontal {{
+                background: {Theme.ACCENT};
+            }}
+            QSlider#consoleSlider::add-page:horizontal {{
+                background: rgba(255, 255, 255, 16);
+                border-radius: 2px;
+            }}
+            QSlider#consoleSlider::handle:horizontal {{
+                background: #ffffff;
+                border: none;
+                width: 10px;
+                height: 10px;
+                margin: -3px 0;
+                border-radius: 5px;
+            }}
+            QSlider#consoleSlider[hovered="true"]::handle:horizontal {{
+                background: #ffffff;
+                border: none;
                 width: 12px;
+                height: 12px;
+                margin: -4px 0;
                 border-radius: 6px;
             }}
-            QSlider#modernSlider::sub-page:vertical {{
-                background: #3f4a5c;
+            QSlider#consoleSlider[active="true"]::handle:horizontal {{
+                background: #ffffff;
+                border: none;
+                width: 12px;
+                height: 12px;
+                margin: -4px 0;
                 border-radius: 6px;
             }}
-            QSlider#modernSlider::add-page:vertical {{
-                background: #ffd400;
-                border-radius: 6px;
+            QFrame#chipContainer {{
+                background-color: transparent;
+                border: none;
             }}
-            QSlider#modernSlider::handle:vertical {{
-                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #ffffff, stop:0.55 #f2f5fc, stop:1 #dbe2ef);
-                border: 2px solid #d8c355;
-                width: 18px;
-                height: 18px;
-                margin: 0 -8px;
-                border-radius: 9px;
+            QListWidget#channelChipList {{
+                background: transparent;
+                border: none;
+                outline: none;
+                padding: 0px;
+                color: {Theme.TEXT_MUTED};
+                font-size: 9px;
+            }}
+            QListWidget#channelChipList::item {{ padding: 0px; }}
+            QWidget#cyberHudTop, QWidget#cyberHudBottom {{
+                background: transparent;
+            }}
+            QLabel#cyberHudDot {{
+                color: {CyberTheme.PINK};
+                font-family: {CyberTheme.MONO};
+                font-size: 9px;
+            }}
+            QLabel#cyberHudRec {{
+                color: {CyberTheme.PINK};
+                font-family: {CyberTheme.MONO};
+                font-size: 8px;
+                font-weight: 700;
+                letter-spacing: 2px;
+            }}
+            QLabel#cyberHudTitle {{
+                color: {CyberTheme.CYAN};
+                font-family: {CyberTheme.MONO};
+                font-size: 8px;
+                font-weight: 700;
+                letter-spacing: 2px;
+            }}
+            QFrame#cyberHudSep {{
+                border: none;
+                border-top: 1px solid rgba(0, 240, 255, 40);
+                max-height: 1px;
+            }}
+            QLabel#cyberHudSysOk {{
+                color: rgba(223, 250, 255, 0.55);
+                font-family: {CyberTheme.MONO};
+                font-size: 8px;
+                letter-spacing: 1px;
+            }}
+            QLabel#cyberHudBars {{
+                color: {CyberTheme.CYAN};
+                font-size: 8px;
+            }}
+            QLabel#cyberHudInfo {{
+                color: rgba(223, 250, 255, 0.45);
+                font-family: {CyberTheme.MONO};
+                font-size: 7px;
+                letter-spacing: 1px;
+            }}
+            QLabel#cyberHudDim {{
+                color: rgba(223, 250, 255, 0.25);
+                font-size: 8px;
+            }}
+            QLabel#cyberDiamonds {{
+                color: {CyberTheme.PINK};
+                font-size: 8px;
+            }}
+            QLabel#cyberChLabel {{
+                color: {CyberTheme.CYAN};
+                font-family: {CyberTheme.MONO};
+                font-size: 7px;
+                letter-spacing: 1px;
+            }}
+            QLabel#cyberHexLabel {{
+                color: {CyberTheme.PINK};
+                font-family: {CyberTheme.MONO};
+                font-size: 7px;
+                letter-spacing: 1px;
             }}
             """
         )
@@ -1006,9 +1672,13 @@ class FlyoutMixerWindow(QWidget):
                 on_toggle_mute=self._on_toggle_mute,
                 on_device_select=self._on_device_select,
                 on_route_app=self._handle_route_drop,
+                on_customize_app=self._on_customize_app,
             )
-            self._cards_layout.addWidget(card, 1)
+            card.set_compact(self._compact_mode)
+            card.set_cyber(self._cyber_mode)
+            self._cards_layout.addWidget(card)
             self._cards[channel.key] = card
+        self._apply_window_height()
 
     def set_device_choices(
         self,
@@ -1044,6 +1714,7 @@ class FlyoutMixerWindow(QWidget):
             self._shared_row.hide()
             for card in self._cards.values():
                 card.set_shared_output_mode(False)
+            self._apply_window_height()
             return
 
         normalized = [(dev_id, self._format_source_name(name)) for dev_id, name in options]
@@ -1060,6 +1731,7 @@ class FlyoutMixerWindow(QWidget):
         self._shared_row.show()
         for card in self._cards.values():
             card.set_shared_output_mode(True)
+        self._apply_window_height()
 
     def _on_shared_device_changed(self, text: str) -> None:
         self._shared_combo.setToolTip(text)
@@ -1089,18 +1761,253 @@ class FlyoutMixerWindow(QWidget):
     def set_status(self, status: str) -> None:
         self._status_label.setText(status)
 
+    def set_compact(self, compact: bool) -> None:
+        self._compact_mode = bool(compact)
+        if self._compact_mode:
+            self.setFixedWidth(390)
+            self._shared_combo.setMinimumWidth(180)
+        else:
+            self.setFixedWidth(500)
+            self._shared_combo.setMinimumWidth(220)
+        for card in self._cards.values():
+            card.set_compact(self._compact_mode)
+        self._apply_window_height()
+
+    def set_cyber_mode(self, cyber: bool) -> None:
+        self._cyber_mode = bool(cyber)
+        self._panel.set_cyber(self._cyber_mode)
+        self._hud_top.setVisible(self._cyber_mode)
+        self._hud_bottom.setVisible(self._cyber_mode)
+        if self._cyber_mode:
+            self._apply_cyber_theme()
+        else:
+            self._apply_theme()
+        for card in self._cards.values():
+            card.set_cyber(self._cyber_mode)
+        self._apply_window_height()
+
+    def _apply_cyber_theme(self) -> None:
+        self.setStyleSheet(
+            f"""
+            QWidget {{
+                font-family: "Cascadia Code", "Consolas", "Courier New", monospace;
+            }}
+            QFrame#flyoutPanel {{
+                background-color: {CyberTheme.BG};
+                border: 1px solid {CyberTheme.CYAN};
+                border-radius: 4px;
+            }}
+            QFrame#flyoutStrip {{
+                background-color: rgba(0, 240, 255, 10);
+                border: 1px solid rgba(0, 240, 255, 50);
+                border-radius: 2px;
+            }}
+            QFrame#flyoutStrip[master="true"] {{
+                background-color: rgba(255, 45, 138, 12);
+                border: 1px solid rgba(255, 45, 138, 70);
+                border-radius: 2px;
+            }}
+            QFrame#flyoutStrip[muted="true"] {{
+                background-color: rgba(255, 45, 138, 22);
+                border: 1px solid rgba(255, 45, 138, 80);
+            }}
+            QWidget#consoleAccentBar {{
+                background-color: {CyberTheme.PINK};
+                border-radius: 0px;
+            }}
+            QLabel#consoleMasterIcon {{
+                background-color: {CyberTheme.PINK};
+                border-radius: 0px;
+            }}
+            QWidget#sharedSourceRow {{
+                background: transparent;
+                border: none;
+            }}
+            QLabel#sharedSourceLabel {{
+                color: {CyberTheme.CYAN};
+                font-size: 10px;
+                font-weight: 600;
+                letter-spacing: 1px;
+                padding-left: 4px;
+            }}
+            QComboBox#deviceCombo {{
+                background-color: rgba(0, 240, 255, 12);
+                border: 1px solid rgba(0, 240, 255, 80);
+                border-radius: 2px;
+                color: {CyberTheme.CYAN};
+                min-height: 24px;
+                padding: 0 10px;
+            }}
+            QComboBox#deviceCombo:hover {{
+                background-color: rgba(0, 240, 255, 22);
+            }}
+            QComboBox#deviceCombo::drop-down {{
+                width: 0px;
+                border: none;
+            }}
+            QComboBox#deviceCombo::down-arrow {{
+                image: none;
+                width: 0px;
+                height: 0px;
+            }}
+            QLabel#flyoutCardTitle {{
+                color: {CyberTheme.CYAN};
+                font-size: 11px;
+                font-weight: 700;
+                letter-spacing: 1px;
+            }}
+            QLabel#flyoutValueLabel {{
+                color: {CyberTheme.TEXT};
+                font-size: 15px;
+                font-weight: 400;
+            }}
+            QLabel#flyoutValueLabel[muted="true"] {{ color: {CyberTheme.PINK}; }}
+            QLabel#flyoutAppsLabel {{
+                color: rgba(0, 240, 255, 140);
+                font-size: 8px;
+                font-weight: 600;
+                letter-spacing: 1px;
+            }}
+            QLabel#flyoutStatusLabel {{
+                color: rgba(0, 240, 255, 140);
+                padding-left: 2px;
+            }}
+            QLabel#consoleBusLabel {{
+                color: rgba(0, 240, 255, 110);
+                font-size: 9px;
+                letter-spacing: 1px;
+            }}
+            QComboBox#consoleDeviceCombo {{
+                background-color: transparent;
+                border: none;
+                color: rgba(0, 240, 255, 110);
+                font-size: 9px;
+                padding: 0px 8px 0px 0px;
+                min-height: 14px;
+                max-height: 16px;
+            }}
+            QComboBox#consoleDeviceCombo::drop-down {{
+                width: 0px;
+                border: none;
+            }}
+            QComboBox#consoleDeviceCombo::down-arrow {{
+                image: none;
+                width: 0px;
+                height: 0px;
+            }}
+            QComboBox QAbstractItemView {{
+                background-color: {CyberTheme.BG};
+                border: 1px solid {CyberTheme.CYAN};
+                border-radius: 2px;
+                color: {CyberTheme.TEXT};
+                outline: none;
+                padding: 3px;
+                selection-background-color: rgba(0, 240, 255, 40);
+                selection-color: {CyberTheme.CYAN};
+            }}
+            QComboBox QAbstractItemView::item {{
+                min-height: 30px;
+                padding: 0 10px;
+                border-radius: 0px;
+            }}
+            QComboBox QAbstractItemView::item:hover {{
+                background-color: rgba(0, 240, 255, 18);
+            }}
+            QComboBox QAbstractItemView::item:selected {{
+                background-color: rgba(0, 240, 255, 40);
+            }}
+            QSlider#consoleSlider {{
+                min-height: 18px;
+                max-height: 18px;
+            }}
+            QSlider#consoleSlider::groove:horizontal {{
+                background: rgba(0, 240, 255, 18);
+                height: 5px;
+                border-radius: 0px;
+            }}
+            QSlider#consoleSlider::sub-page:horizontal {{
+                background: {CyberTheme.CYAN};
+                border-radius: 0px;
+            }}
+            QSlider#consoleSlider[master="true"]::sub-page:horizontal {{
+                background: {CyberTheme.PINK};
+            }}
+            QSlider#consoleSlider::add-page:horizontal {{
+                background: rgba(0, 240, 255, 18);
+                border-radius: 0px;
+            }}
+            QSlider#consoleSlider::handle:horizontal {{
+                background: {CyberTheme.CYAN};
+                border: none;
+                width: 8px;
+                height: 8px;
+                margin: -2px 0;
+                border-radius: 0px;
+            }}
+            QSlider#consoleSlider[hovered="true"]::handle:horizontal {{
+                background: {CyberTheme.CYAN};
+                border: none;
+                width: 10px;
+                height: 10px;
+                margin: -3px 0;
+                border-radius: 0px;
+            }}
+            QSlider#consoleSlider[active="true"]::handle:horizontal {{
+                background: #ffffff;
+                border: none;
+                width: 10px;
+                height: 10px;
+                margin: -3px 0;
+                border-radius: 0px;
+            }}
+            QFrame#chipContainer {{
+                background-color: transparent;
+                border: none;
+            }}
+            QListWidget#channelChipList {{
+                background: transparent;
+                border: none;
+                outline: none;
+                padding: 0px;
+                color: rgba(0, 240, 255, 160);
+                font-size: 8px;
+            }}
+            QListWidget#channelChipList::item {{ padding: 0px; }}
+            """
+        )
+
+    def _apply_window_height(self) -> None:
+        rows = list(self._cards.values())
+        if rows:
+            rows_h = sum(card.height() for card in rows) + max(0, len(rows) - 1) * 5
+        else:
+            rows_h = 58 if self._compact_mode else 74
+        # 16px root margins (8+8) + 20px panel margins (10+10) = 36 base
+        extra = (30 + 6) if not self._shared_row.isHidden() else 0
+        status_extra = 20 if self._status_label.isVisible() else 0
+        hud_extra = (20 + 6 + 18 + 6) if self._cyber_mode else 0
+        self.setFixedHeight(36 + extra + rows_h + status_extra + hud_extra)
+
     def set_logs_visible(self, visible: bool) -> None:
         self._status_label.setVisible(bool(visible))
+        self._apply_window_height()
 
     def set_app_sessions(self, sessions: list[tuple[str, str]]) -> None:
         self._pid_label = {pid: label for pid, label in sessions}
 
-    def set_channel_apps(self, channel_apps: dict[str, list[tuple[str, str]]]) -> None:
+    def set_channel_apps(self, channel_apps: dict[str, list[tuple[str, ...]]]) -> None:
         self._channel_apps = {k: list(v) for k, v in channel_apps.items()}
         for key, apps in self._channel_apps.items():
             card = self._cards.get(key)
             if card:
                 card.set_assigned_apps(apps)
+        self._apply_window_height()
+
+    def set_channel_levels(self, levels: dict[str, float]) -> None:
+        for key, level in levels.items():
+            card = self._cards.get(key)
+            if card:
+                card.set_audio_level(level)
 
     def _handle_route_drop(self, process_id: str, target_channel: str) -> None:
         pid = process_id.strip()
@@ -1111,9 +2018,18 @@ class FlyoutMixerWindow(QWidget):
 
     def _move_app_locally(self, process_id: str, target_channel: str) -> None:
         label = self._pid_label.get(process_id, f"pid:{process_id}")
+        moving: tuple[str, ...] | None = None
         for key in ("game", "chatRender", "media"):
-            self._channel_apps[key] = [item for item in self._channel_apps.get(key, []) if item[0] != process_id]
-        self._channel_apps.setdefault(target_channel, []).append((process_id, label))
+            kept: list[tuple[str, ...]] = []
+            for item in self._channel_apps.get(key, []):
+                if item and item[0] == process_id:
+                    moving = item
+                    continue
+                kept.append(item)
+            self._channel_apps[key] = kept
+        if moving is None:
+            moving = (process_id, label, label.lower(), "")
+        self._channel_apps.setdefault(target_channel, []).append(moving)
 
         for key in ("game", "chatRender", "media"):
             card = self._cards.get(key)
@@ -1129,7 +2045,7 @@ class FlyoutMixerWindow(QWidget):
             card.set_muted(muted)
 
     def show_near(self, tray_rect: QRect | None) -> None:
-        self.adjustSize()
+        self._apply_window_height()
         if tray_rect is None or tray_rect.isNull():
             screen = QGuiApplication.primaryScreen()
             if screen is not None:
@@ -1162,6 +2078,18 @@ class FlyoutMixerWindow(QWidget):
             return
         self.show_near(tray_rect)
 
+    def nativeEvent(self, event_type, message) -> tuple:  # type: ignore[override]
+        """Return HTCLIENT for all hit-tests to prevent transparent-area click-through."""
+        if event_type == b"windows_generic_MSG":
+            try:
+                import ctypes.wintypes as wt
+                msg = ctypes.cast(int(message), ctypes.POINTER(wt.MSG)).contents
+                if msg.message == 0x0084:  # WM_NCHITTEST → HTCLIENT
+                    return True, 1
+            except Exception:
+                pass
+        return super().nativeEvent(event_type, message)
+
     def keyPressEvent(self, event) -> None:  # type: ignore[override]
         if event.key() == Qt.Key.Key_Escape:
             self.hide()
@@ -1173,10 +2101,22 @@ class FlyoutMixerWindow(QWidget):
         super().hideEvent(event)
         self._remove_outside_filter()
 
+    def changeEvent(self, event) -> None:  # type: ignore[override]
+        super().changeEvent(event)
+        if event.type() == QEvent.Type.ActivationChange:
+            if not self.isActiveWindow() and QApplication.activePopupWidget() is None:
+                # If the cursor is still within our frame geometry the deactivation
+                # was caused by a transparent-corner click (WM_NCHITTEST miss).
+                # Re-activate so the flyout stays open; real outside clicks land
+                # with the cursor outside our rect and will fall through to hide().
+                if self.frameGeometry().contains(QCursor.pos()):
+                    self.activateWindow()
+                    return
+                self.hide()
+
     def eventFilter(self, watched: QObject, event: QEvent) -> bool:
         if watched is QApplication.instance() and self.isVisible():
-            popup = QApplication.activePopupWidget()
-            if popup is not None:
+            if QApplication.activePopupWidget() is not None:
                 return super().eventFilter(watched, event)
             if event.type() == QEvent.Type.MouseButtonPress:
                 pos = event.globalPosition().toPoint()  # type: ignore[attr-defined]
@@ -1198,451 +2138,349 @@ class FlyoutMixerWindow(QWidget):
         app.removeEventFilter(self)
         self._outside_filter_installed = False
 
-class ControlWindow(QMainWindow):
+
+class SettingsWindow(QDialog):
     def __init__(
         self,
-        on_refresh: Callable[[], None],
-        on_volume_change: Callable[[str, int], None],
-        on_toggle_mute: Callable[[str], None],
-        on_toggle_all_mute: Callable[[], None],
-        on_device_select: Callable[[str, str], None],
-        on_route_app: Callable[[str, str], None],
-        compact_mode: bool = True,
+        on_toggle_startup: Callable[[bool], None],
+        on_toggle_compact: Callable[[bool], None],
+        on_toggle_logs: Callable[[bool], None],
+        config_path: str,
+        on_toggle_cyber: Callable[[bool], None] | None = None,
     ) -> None:
-        super().__init__()
-        self._compact_mode = compact_mode
-        self.setWindowTitle("Sonar Mixer")
+        super().__init__(None)
+        self._on_toggle_startup = on_toggle_startup
+        self._on_toggle_compact = on_toggle_compact
+        self._on_toggle_logs = on_toggle_logs
+        self._on_toggle_cyber = on_toggle_cyber
+        self._tab_buttons: dict[str, QPushButton] = {}
+        self.setWindowTitle("Sonar Mixer Settings")
+        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Tool)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        self.setFixedSize(660, 450)
 
-        self._on_refresh = on_refresh
-        self._on_volume_change = on_volume_change
-        self._on_toggle_mute = on_toggle_mute
-        self._on_toggle_all_mute = on_toggle_all_mute
-        self._on_device_select = on_device_select
-        self._on_route_app = on_route_app
-        self._cards: dict[str, ChannelCard] = {}
-        self._channel_apps: dict[str, list[tuple[str, str]]] = {"game": [], "chatRender": [], "media": []}
-        self._pid_label: dict[str, str] = {}
-        self._last_channels: list[ChannelState] = []
-        self._device_cache: dict[str, tuple[list[tuple[str, str]], str | None, bool, str | None]] = {}
-        self._force_rebuild = False
-        self._dispatcher = _UiDispatcher()
+        root = QVBoxLayout(self)
+        root.setContentsMargins(10, 10, 10, 10)
+        root.setSpacing(0)
 
-        self._build_ui()
-        self._apply_window_mode()
-        self._apply_theme()
+        shell = QFrame()
+        shell.setObjectName("settingsShell")
+        root.addWidget(shell)
+        shell_layout = QVBoxLayout(shell)
+        shell_layout.setContentsMargins(0, 0, 0, 0)
+        shell_layout.setSpacing(0)
 
-    def dispatch(self, callback: Callable[[], None]) -> None:
-        self._dispatcher.invoke.emit(callback)
+        title_bar = QWidget()
+        title_bar.setObjectName("settingsTitleBar")
+        title_layout = QHBoxLayout(title_bar)
+        title_layout.setContentsMargins(14, 0, 6, 0)
+        title_layout.setSpacing(8)
+        icon = QLabel()
+        icon.setPixmap(FlyoutChannelStrip._build_master_icon().pixmap(16, 16))
+        title_layout.addWidget(icon)
+        title = QLabel("Sonar Mixer · Settings")
+        title.setObjectName("settingsTitle")
+        title_layout.addWidget(title)
+        title_layout.addStretch(1)
+        close = QPushButton("x")
+        close.setObjectName("settingsClose")
+        close.clicked.connect(self.close)
+        title_layout.addWidget(close)
+        shell_layout.addWidget(title_bar)
 
-    def set_channels(self, channels: list[ChannelState]) -> None:
-        self._last_channels = list(channels)
-        incoming_keys = [c.key for c in channels]
-        existing_keys = list(self._cards.keys())
+        body = QWidget()
+        body_layout = QHBoxLayout(body)
+        body_layout.setContentsMargins(0, 0, 0, 0)
+        body_layout.setSpacing(0)
+        shell_layout.addWidget(body, 1)
 
-        if not self._force_rebuild and existing_keys and set(existing_keys) == set(incoming_keys):
-            for channel in channels:
-                card = self._cards.get(channel.key)
-                if not card:
-                    continue
-                card.set_volume_value(channel.volume)
-                card.set_muted(channel.muted)
-            return
+        sidebar = QWidget()
+        sidebar.setObjectName("settingsSidebar")
+        sidebar_layout = QVBoxLayout(sidebar)
+        sidebar_layout.setContentsMargins(8, 8, 8, 8)
+        sidebar_layout.setSpacing(2)
+        body_layout.addWidget(sidebar)
 
-        self._force_rebuild = False
-        while self._cards_layout.count():
-            item = self._cards_layout.takeAt(0)
-            widget = item.widget()
-            if widget:
-                widget.deleteLater()
+        self._stack = QStackedWidget()
+        self._stack.setObjectName("settingsStack")
+        body_layout.addWidget(self._stack, 1)
 
-        self._cards.clear()
-        self._cards_layout.addStretch(1)
-        for channel in channels:
-            card = ChannelCard(
-                channel=channel,
-                on_volume_change=self._on_volume_change,
-                on_toggle_mute=self._on_toggle_mute,
-                on_toggle_all_mute=self._on_toggle_all_mute,
-                on_device_select=self._on_device_select,
-                on_route_app=self._handle_route_drop,
-                on_refresh_all=self._on_refresh,
-                on_toggle_mode=self._toggle_mode,
-                compact=self._compact_mode,
+        self._startup = self._check("Launch at Windows startup", self._on_toggle_startup)
+        self._compact = self._check("Use compact flyout", self._on_toggle_compact)
+        self._logs = self._check("Show status line", self._on_toggle_logs)
+        self._cyber = self._check("Cyberpunk theme", self._on_toggle_cyber or (lambda _: None))
+
+        pages = [
+            ("general", "General", self._general_page()),
+            ("audio", "Audio", self._audio_page()),
+            ("routing", "Routing", self._routing_page()),
+            ("about", "About", self._about_page(config_path)),
+        ]
+        for index, (key, label, page) in enumerate(pages):
+            button = QPushButton(label)
+            button.setObjectName("settingsTab")
+            button.setCheckable(True)
+            button.clicked.connect(lambda _=False, i=index, k=key: self._select_tab(i, k))
+            sidebar_layout.addWidget(button)
+            self._tab_buttons[key] = button
+            self._stack.addWidget(page)
+        sidebar_layout.addStretch(1)
+        version = QLabel("v0.1.3")
+        version.setObjectName("settingsVersion")
+        sidebar_layout.addWidget(version)
+        self._select_tab(0, "general")
+        self._apply_settings_theme()
+
+    def set_states(self, startup: bool, compact: bool, logs: bool, cyber: bool = False) -> None:
+        for widget, value in (
+            (self._startup, startup),
+            (self._compact, compact),
+            (self._logs, logs),
+            (self._cyber, cyber),
+        ):
+            widget.blockSignals(True)
+            widget.setChecked(value)
+            widget.blockSignals(False)
+
+    def show_window(self) -> None:
+        _enable_windows_blur(int(self.winId()))
+        self.show()
+        self.raise_()
+        self.activateWindow()
+
+    def _general_page(self) -> QWidget:
+        page = self._page("General")
+        page.layout().addWidget(self._row("Launch at Windows startup", "Starts minimized to the system tray.", self._startup))
+        page.layout().addWidget(self._row("Compact view", "Use the smaller tray flyout layout.", self._compact))
+        page.layout().addWidget(self._row("Status line", "Show connection and action messages under the mixer.", self._logs))
+        page.layout().addWidget(self._row("Cyberpunk theme", "Neon glow aesthetic with angular HUD elements.", self._cyber))
+        page.layout().addStretch(1)
+        return page
+
+    def _about_page(self, config_path: str) -> QWidget:
+        page = self._page("About")
+        text = QLabel(
+            "Sonar Mixer\n"
+            "A compact tray mixer for SteelSeries Sonar.\n\n"
+            "Runtime integrations:\n"
+            "- SteelSeries Sonar local API\n"
+            "- Windows Core Audio peak meters\n"
+            "- Windows startup registry\n\n"
+            f"Config:\n{config_path}"
+        )
+        text.setObjectName("settingsBodyText")
+        text.setWordWrap(True)
+        page.layout().addWidget(text)
+        page.layout().addStretch(1)
+        return page
+
+    def _audio_page(self) -> QWidget:
+        page = self._page("Audio")
+        page.layout().addWidget(
+            self._info_card(
+                "Output source selection",
+                "Game, Chat, and Media output devices are controlled from the mixer source controls.",
             )
-            self._cards_layout.addWidget(card, 0)
-            self._cards[channel.key] = card
-        self._cards_layout.addStretch(1)
-
-        # Re-apply cached device choices and channel apps after rebuild.
-        for key, (options, current, linked, reason) in self._device_cache.items():
-            self.set_device_choices(key, options, current, linked=linked, disabled_reason=reason)
-        self.set_channel_apps(self._channel_apps)
-
-    def set_device_choices(
-        self,
-        channel_key: str,
-        options: list[tuple[str, str]],
-        current_device_id: str | None,
-        editable: bool = True,
-        disabled_reason: str | None = None,
-        linked: bool = False,
-    ) -> None:
-        self._device_cache[channel_key] = (list(options), current_device_id, linked, disabled_reason)
-        card = self._cards.get(channel_key)
-        if card:
-            card.set_device_choices(
-                options,
-                current_device_id,
-                editable=editable,
-                disabled_reason=disabled_reason,
-                linked=linked,
+        )
+        page.layout().addWidget(
+            self._info_card(
+                "Live activity meters",
+                "Meters use Windows Core Audio session peak levels. Master falls back to the loudest active session when Windows reports no default-output peak.",
             )
+        )
+        page.layout().addWidget(
+            self._info_card(
+                "Volume behavior",
+                "Slider changes are debounced so dragging stays responsive while Sonar receives fewer API writes.",
+            )
+        )
+        page.layout().addStretch(1)
+        return page
 
-    def set_shared_device_choices(
-        self,
-        options: list[tuple[str, str]],
-        current_device_id: str | None,
-        channel_key: str = "game",
-    ) -> None:
-        _ = options
-        _ = current_device_id
-        _ = channel_key
+    def _routing_page(self) -> QWidget:
+        page = self._page("App routing")
+        page.layout().addWidget(
+            self._info_card(
+                "Drag between channels",
+                "Drag app chips between Game, Chat, and Media to route their process through Sonar.",
+            )
+        )
+        page.layout().addWidget(
+            self._info_card(
+                "Rename and color chips",
+                "Right click a chip to set a custom display name or color. Overrides persist in config.json by process identity.",
+            )
+        )
+        page.layout().addWidget(
+            self._info_card(
+                "Inactive app retention",
+                "Recently active apps remain visible briefly so routing does not flicker when sessions idle.",
+            )
+        )
+        page.layout().addStretch(1)
+        return page
 
-    def set_status(self, status: str) -> None:
-        self._status_label.setText(status)
+    def _page(self, title: str) -> QWidget:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(18, 18, 18, 18)
+        layout.setSpacing(0)
+        heading = QLabel(title)
+        heading.setObjectName("settingsHeading")
+        layout.addWidget(heading)
+        return page
 
-    def set_logs_visible(self, visible: bool) -> None:
-        _ = visible
+    def _row(self, label: str, hint: str, control: QWidget) -> QWidget:
+        row = QWidget()
+        layout = QHBoxLayout(row)
+        layout.setContentsMargins(0, 12, 0, 12)
+        layout.setSpacing(16)
+        copy = QWidget()
+        copy_layout = QVBoxLayout(copy)
+        copy_layout.setContentsMargins(0, 0, 0, 0)
+        copy_layout.setSpacing(2)
+        title = QLabel(label)
+        title.setObjectName("settingsRowTitle")
+        sub = QLabel(hint)
+        sub.setObjectName("settingsRowHint")
+        sub.setWordWrap(True)
+        copy_layout.addWidget(title)
+        copy_layout.addWidget(sub)
+        layout.addWidget(copy, 1)
+        layout.addWidget(control)
+        return row
 
-    def set_logs_visible(self, visible: bool) -> None:
-        self._status_label.setVisible(bool(visible))
+    def _info_card(self, title: str, body: str) -> QWidget:
+        card = QFrame()
+        card.setObjectName("settingsInfoCard")
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(12, 10, 12, 10)
+        layout.setSpacing(4)
+        heading = QLabel(title)
+        heading.setObjectName("settingsRowTitle")
+        text = QLabel(body)
+        text.setObjectName("settingsRowHint")
+        text.setWordWrap(True)
+        layout.addWidget(heading)
+        layout.addWidget(text)
+        return card
 
-    def set_app_sessions(self, sessions: list[tuple[str, str]]) -> None:
-        self._pid_label = {pid: label for pid, label in sessions}
+    def _check(self, label: str, callback: Callable[[bool], None]) -> QCheckBox:
+        box = QCheckBox()
+        box.setObjectName("settingsToggle")
+        box.setAccessibleName(label)
+        box.setFixedSize(22, 22)
+        box.toggled.connect(callback)
+        return box
 
-    def set_channel_apps(self, channel_apps: dict[str, list[tuple[str, str]]]) -> None:
-        self._channel_apps = self._normalize_channel_apps(channel_apps)
-        for key, apps in channel_apps.items():
-            card = self._cards.get(key)
-            if card:
-                card.set_assigned_apps(self._channel_apps.get(key, []))
+    def _select_tab(self, index: int, key: str) -> None:
+        self._stack.setCurrentIndex(index)
+        for tab_key, button in self._tab_buttons.items():
+            button.setChecked(tab_key == key)
 
-    def _handle_route_drop(self, process_id: str, target_channel: str) -> None:
-        pid = process_id.strip()
-        if not pid:
+    def mousePressEvent(self, event) -> None:  # type: ignore[override]
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._drag_pos = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event) -> None:  # type: ignore[override]
+        drag_pos = getattr(self, "_drag_pos", None)
+        if drag_pos is not None and event.buttons() & Qt.MouseButton.LeftButton:
+            self.move(event.globalPosition().toPoint() - drag_pos)
+            event.accept()
             return
-        self._move_app_locally(pid, target_channel)
-        self._on_route_app(pid, target_channel)
+        super().mouseMoveEvent(event)
 
-    def _move_app_locally(self, process_id: str, target_channel: str) -> None:
-        label = self._pid_label.get(process_id, f"pid:{process_id}")
-
-        for key in ("game", "chatRender", "media"):
-            current = self._channel_apps.get(key, [])
-            self._channel_apps[key] = [
-                item for item in current if item[0] != process_id and item[1].strip().lower() != label.strip().lower()
-            ]
-
-        target = self._channel_apps.setdefault(target_channel, [])
-        if not any(item[0] == process_id or item[1].strip().lower() == label.strip().lower() for item in target):
-            target.append((process_id, label))
-
-        for key in ("game", "chatRender", "media"):
-            card = self._cards.get(key)
-            if card:
-                card.set_assigned_apps(self._channel_apps.get(key, []))
-
-    @staticmethod
-    def _normalize_channel_apps(channel_apps: dict[str, list[tuple[str, str]]]) -> dict[str, list[tuple[str, str]]]:
-        normalized: dict[str, list[tuple[str, str]]] = {}
-        for key in ("game", "chatRender", "media"):
-            out: list[tuple[str, str]] = []
-            seen_pid: set[str] = set()
-            seen_label: set[str] = set()
-            for pid, label in channel_apps.get(key, []):
-                p = str(pid).strip()
-                l = str(label).strip()
-                if not p or not l:
-                    continue
-                lk = l.lower()
-                if p in seen_pid or lk in seen_label:
-                    continue
-                seen_pid.add(p)
-                seen_label.add(lk)
-                out.append((p, l))
-            normalized[key] = out
-        return normalized
-
-    def is_visible(self) -> bool:
-        return self.isVisible()
-
-    def update_mute_state(self, channel_key: str, muted: bool) -> None:
-        card = self._cards.get(channel_key)
-        if card:
-            card.set_muted(muted)
-
-    def _build_ui(self) -> None:
-        root = QWidget()
-        root.setObjectName("appRoot")
-        self.setCentralWidget(root)
-
-        center_layout = QHBoxLayout(root)
-        center_layout.setContentsMargins(Theme.OUTER_PAD, Theme.OUTER_PAD, Theme.OUTER_PAD, Theme.OUTER_PAD)
-        center_layout.setSpacing(0)
-        center_layout.addStretch(1)
-
-        content = QWidget()
-        content.setObjectName("contentRoot")
-        content.setMaximumWidth(Theme.CONTENT_MAX_WIDTH)
-        content_col = QVBoxLayout(content)
-        content_col.setContentsMargins(0, 0, 0, 0)
-        content_col.setSpacing(8)
-        center_layout.addWidget(content, 1)
-        center_layout.addStretch(1)
-
-        cards_host = QWidget()
-        cards_host.setObjectName("cardsHost")
-        self._cards_layout = QHBoxLayout(cards_host)
-        self._cards_layout.setContentsMargins(0, 0, 0, 0)
-        self._cards_layout.setSpacing(4)
-        content_col.addWidget(cards_host, 1)
-
-        self._status_label = QLabel("Ready")
-        self._status_label.setObjectName("statusLabel")
-        self._status_label.setFont(QFont("Segoe UI", 9))
-        content_col.addWidget(self._status_label)
-
-    def _apply_window_mode(self) -> None:
-        if self._compact_mode:
-            self.setFixedSize(700, 490)
-        else:
-            self.setFixedSize(960, 760)
-
-    def _toggle_mode(self) -> None:
-        self._compact_mode = not self._compact_mode
-        self._apply_window_mode()
-        self._force_rebuild = True
-        if self._last_channels:
-            self.set_channels(self._last_channels)
-        self._apply_theme()
-
-    def _apply_theme(self) -> None:
+    def _apply_settings_theme(self) -> None:
         self.setStyleSheet(
             f"""
-            QWidget#appRoot {{
-                background-color: #1f1f1f;
+            QFrame#settingsShell {{
+                background-color: rgba(18, 22, 32, 230);
+                border: 1px solid rgba(255, 255, 255, 22);
+                border-radius: 14px;
+            }}
+            QWidget#settingsTitleBar {{
+                border-bottom: 1px solid rgba(255, 255, 255, 12);
+                min-height: 34px;
+                max-height: 34px;
+            }}
+            QLabel#settingsTitle {{
                 color: {Theme.TEXT};
-            }}
-            QWidget#cardsHost {{
-                background: transparent;
-                border: none;
-            }}
-            QLabel#appTitle {{
-                color: #f0f0f0;
-                letter-spacing: 0.6px;
-            }}
-            QLabel#appSubtitle {{
-                color: {Theme.TEXT_MUTED};
-                padding-top: 6px;
-            }}
-            QLabel#statusLabel {{
-                color: {Theme.TEXT_MUTED};
-                padding-left: 4px;
-            }}
-            QLabel#sectionTitle {{
-                color: {Theme.TEXT_MUTED};
-                font-size: 11px;
-                font-weight: 700;
-                letter-spacing: 1.0px;
-            }}
-            QLabel#sectionSubtitle {{
-                color: {Theme.TEXT_MUTED};
-                font-size: 10px;
-                padding-bottom: 2px;
-            }}
-            QLabel#routeLabel {{
-                color: {Theme.TEXT_MUTED};
-                font-size: 10px;
-                padding-right: 4px;
-            }}
-            QFrame#channelCard {{
-                background-color: #2a2a2a;
-                border: 1px solid #3a3a3a;
-                border-radius: 10px;
-            }}
-            QFrame#faderWrap {{
-                background-color: transparent;
-                border: none;
-            }}
-            QLabel#cardTitle {{
-                color: #d4dbe6;
                 font-size: 12px;
                 font-weight: 600;
-                letter-spacing: 1.4px;
             }}
-            QLabel#appsLabel {{
+            QPushButton#settingsClose {{
+                background: transparent;
+                border: none;
                 color: {Theme.TEXT_MUTED};
-                font-size: 9px;
-                font-weight: 600;
-                letter-spacing: 1.1px;
-                padding-top: 2px;
-            }}
-            QLabel#valueLabel {{
-                color: {Theme.ACCENT};
-                font-size: 20px;
-                font-weight: 700;
-                padding-bottom: 2px;
-            }}
-            QPushButton#ghostButton,
-            QPushButton#muteToggle {{
-                background-color: #313131;
-                border: 1px solid #4a4a4a;
-                border-radius: 6px;
-                color: {Theme.TEXT};
-                font-size: 10px;
-                font-weight: 600;
-                min-height: 30px;
-                padding: 0 12px;
-            }}
-            QPushButton#ghostButton:hover,
-            QPushButton#muteToggle:hover {{
-                border: 1px solid #3a4658;
-                background-color: #202a38;
-            }}
-            QPushButton#muteToggle:checked {{
-                background-color: {Theme.ACCENT};
-                border: 1px solid {Theme.ACCENT};
-                color: #11151d;
-            }}
-            QPushButton#primaryButton {{
-                background-color: {Theme.ACCENT};
-                border: 1px solid {Theme.ACCENT};
-                border-radius: 11px;
-                color: #10141c;
-                font-size: 11px;
-                font-weight: 700;
-                min-height: 36px;
-                min-width: 100px;
-            }}
-            QPushButton#primaryButton:hover {{
-                background-color: #ffe049;
-                border: 1px solid #ffe049;
-            }}
-            QPushButton#primaryButton:disabled {{
-                background-color: #2a313d;
-                border: 1px solid #2a313d;
-                color: #7c8796;
-            }}
-            QComboBox#deviceCombo,
-            QComboBox#sessionCombo,
-            QComboBox#roleCombo {{
-                background-color: #252525;
-                border: 1px solid #454545;
-                border-radius: 6px;
-                color: {Theme.TEXT};
-                min-height: 30px;
-                padding: 0 8px;
-            }}
-            QComboBox#deviceCombo:hover,
-            QComboBox#sessionCombo:hover,
-            QComboBox#roleCombo:hover {{
-                border: 1px solid #3a4658;
-            }}
-            QComboBox#deviceComboCompact {{
-                background-color: #252525;
-                border: 1px solid #454545;
-                border-radius: 6px;
-                color: transparent;
-                min-height: 30px;
                 min-width: 40px;
-                max-width: 40px;
-                padding: 0px;
+                min-height: 28px;
+                font-size: 14px;
             }}
-            QComboBox#deviceComboCompact:hover {{
-                border: 1px solid #5c5c5c;
+            QPushButton#settingsClose:hover {{
+                background-color: rgba(255, 111, 134, 70);
+                color: {Theme.TEXT};
             }}
-            QComboBox#deviceComboCompact:focus {{
-                border: 1px solid {Theme.ACCENT};
+            QWidget#settingsSidebar {{
+                border-right: 1px solid rgba(255, 255, 255, 12);
+                min-width: 160px;
+                max-width: 160px;
             }}
-            QComboBox#deviceCombo:focus,
-            QComboBox#sessionCombo:focus,
-            QComboBox#roleCombo:focus {{
-                border: 1px solid {Theme.ACCENT};
-            }}
-            QComboBox#deviceCombo QLineEdit {{
+            QPushButton#settingsTab {{
                 background: transparent;
                 border: none;
-                color: {Theme.TEXT};
-                padding-left: 0px;
-                selection-background-color: transparent;
-            }}
-            QComboBox::drop-down {{
-                border: none;
-                width: 26px;
-            }}
-            QComboBox#deviceComboCompact::drop-down {{
-                width: 0px;
-                border: none;
-            }}
-            QComboBox QAbstractItemView {{
-                background-color: #151c26;
-                border: 1px solid {Theme.BORDER};
-                color: {Theme.TEXT};
-                selection-background-color: {Theme.ACCENT};
-                selection-color: #11151d;
-            }}
-            QFrame#chipContainer {{
-                background-color: #1f2732;
-                border: 1px solid #334051;
-                border-radius: 8px;
-            }}
-            QLabel#chipEmptyLabel {{
+                border-radius: 7px;
                 color: {Theme.TEXT_MUTED};
-                font-size: 10px;
-                padding: 8px 4px;
+                min-height: 34px;
+                padding: 0 10px;
+                text-align: left;
+                font-weight: 600;
             }}
-            QListWidget#channelChipList {{
-                background: transparent;
-                border: none;
-                outline: none;
-                padding: 2px;
+            QPushButton#settingsTab:checked {{
+                background-color: rgba(255, 255, 255, 16);
                 color: {Theme.TEXT};
-                font-size: 10px;
+                border-left: 2px solid {Theme.ACCENT};
             }}
-            QListWidget#channelChipList::item {{ padding: 0px; }}
-            QSlider#modernSlider {{
-                min-width: 44px;
-                max-width: 44px;
-                min-height: 140px;
-                max-height: 640px;
+            QLabel#settingsVersion,
+            QLabel#settingsRowHint,
+            QLabel#settingsBodyText {{
+                color: {Theme.TEXT_MUTED};
+                font-size: 11px;
             }}
-            QSlider#modernSlider::groove:vertical {{
-                background: #1e2733;
-                width: 16px;
+            QLabel#settingsHeading {{
+                color: {Theme.TEXT};
+                font-size: 18px;
+                font-weight: 700;
+                padding-bottom: 12px;
+            }}
+            QLabel#settingsRowTitle {{
+                color: {Theme.TEXT};
+                font-size: 13px;
+                font-weight: 600;
+            }}
+            QFrame#settingsInfoCard {{
+                background-color: rgba(255, 255, 255, 9);
+                border: 1px solid rgba(255, 255, 255, 13);
                 border-radius: 8px;
+                margin-bottom: 8px;
             }}
-            QSlider#modernSlider[hovered="true"]::groove:vertical {{
-                background: {Theme.TRACK_HOVER};
+            QCheckBox#settingsToggle {{
+                color: {Theme.TEXT};
+                spacing: 0px;
             }}
-            QSlider#modernSlider::sub-page:vertical {{
-                background: {Theme.ACCENT};
-                border-radius: 8px;
+            QCheckBox#settingsToggle::indicator {{
+                width: 18px;
+                height: 18px;
+                border-radius: 4px;
+                background-color: rgba(255,255,255,10);
+                border: 1px solid rgba(255,255,255,42);
             }}
-            QSlider#modernSlider::add-page:vertical {{
-                background: #1e2733;
-                border-radius: 8px;
+            QCheckBox#settingsToggle::indicator:checked {{
+                background-color: {Theme.ACCENT};
+                border: 1px solid {Theme.ACCENT};
             }}
-            QSlider#modernSlider::handle:vertical {{
-                background: #f4f7ff;
-                border: 2px solid {Theme.ACCENT};
-                width: 22px;
-                height: 22px;
-                margin: 0 -11px;
-                border-radius: 11px;
-            }}
-            QSlider#modernSlider[active="true"]::handle:vertical {{
-                background: #ffffff;
-                border: 2px solid #ffe34f;
+            QCheckBox#settingsToggle::indicator:hover {{
+                border: 1px solid rgba(255,255,255,70);
             }}
             """
         )

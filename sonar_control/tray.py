@@ -15,17 +15,25 @@ class TrayController(QObject):
         self,
         on_toggle: Callable[[], None],
         on_refresh: Callable[[], None],
+        on_settings: Callable[[], None],
+        on_toggle_compact: Callable[[bool], None],
+        compact_mode: bool,
         on_toggle_logs: Callable[[bool], None],
         show_logs: bool,
         on_toggle_startup: Callable[[bool], None],
         startup_enabled: bool,
         on_exit: Callable[[], None],
+        on_toggle_cyber: Callable[[bool], None] | None = None,
+        cyber_mode: bool = False,
     ) -> None:
         super().__init__()
         self._on_toggle = on_toggle
         self._on_refresh = on_refresh
+        self._on_settings = on_settings
+        self._on_toggle_compact = on_toggle_compact
         self._on_toggle_logs = on_toggle_logs
         self._on_toggle_startup = on_toggle_startup
+        self._on_toggle_cyber = on_toggle_cyber
         self._on_exit = on_exit
 
         self._tray = QSystemTrayIcon(self)
@@ -35,25 +43,84 @@ class TrayController(QObject):
         self._last_trigger_at = 0.0
 
         menu = QMenu()
-        refresh_action = QAction("Refresh", menu)
+        menu.setObjectName("trayMenu")
+        menu.setStyleSheet(
+            """
+            QMenu#trayMenu {
+                background-color: rgb(18, 22, 32);
+                border: 1px solid rgba(255, 255, 255, 24);
+                border-radius: 10px;
+                padding: 6px;
+                color: #eef2f8;
+            }
+            QMenu#trayMenu::item {
+                min-height: 26px;
+                padding: 5px 28px 5px 28px;
+                border-radius: 5px;
+            }
+            QMenu#trayMenu::item:selected {
+                background-color: rgba(255, 255, 255, 20);
+            }
+            QMenu#trayMenu::item:checked {
+                color: #ff6f86;
+            }
+            QMenu#trayMenu::separator {
+                height: 1px;
+                background: rgba(255, 255, 255, 14);
+                margin: 5px 8px;
+            }
+            """
+        )
+        title_action = QAction(self._build_icon(), "Sonar Mixer", menu)
+        title_action.setEnabled(False)
+        menu.addAction(title_action)
+        connected_action = QAction(self._action_icon("#48efaa"), "Connected", menu)
+        connected_action.setEnabled(False)
+        menu.addAction(connected_action)
+        menu.addSeparator()
+
+        open_action = QAction(self._action_icon("#ff6f86"), "Open mixer", menu)
+        open_action.triggered.connect(self._on_toggle)
+        menu.addAction(open_action)
+
+        refresh_action = QAction(self._action_icon("#4cc2ff"), "Refresh devices", menu)
         refresh_action.triggered.connect(self._on_refresh)
         menu.addAction(refresh_action)
 
-        self._startup_action = QAction("Start with Windows", menu)
+        menu.addSeparator()
+
+        self._startup_action = QAction(self._action_icon("#48efaa"), "Start with Windows", menu)
         self._startup_action.setCheckable(True)
         self._startup_action.setChecked(startup_enabled)
         self._startup_action.toggled.connect(self._on_toggle_startup)
         menu.addAction(self._startup_action)
 
-        self._show_logs_action = QAction("Show logs", menu)
+        self._compact_action = QAction(self._action_icon("#ffb24a"), "Compact view", menu)
+        self._compact_action.setCheckable(True)
+        self._compact_action.setChecked(compact_mode)
+        self._compact_action.toggled.connect(self._on_toggle_compact)
+        menu.addAction(self._compact_action)
+
+        self._show_logs_action = QAction(self._action_icon("#b48cff"), "Show status line", menu)
         self._show_logs_action.setCheckable(True)
         self._show_logs_action.setChecked(show_logs)
         self._show_logs_action.toggled.connect(self._on_toggle_logs)
         menu.addAction(self._show_logs_action)
 
+        self._cyber_action = QAction(self._action_icon("#00f0ff"), "Cyber theme", menu)
+        self._cyber_action.setCheckable(True)
+        self._cyber_action.setChecked(cyber_mode)
+        if on_toggle_cyber:
+            self._cyber_action.toggled.connect(on_toggle_cyber)
+        menu.addAction(self._cyber_action)
+
         menu.addSeparator()
 
-        quit_action = QAction("Quit", menu)
+        settings_action = QAction(self._action_icon("#eef2f8"), "Settings...", menu)
+        settings_action.triggered.connect(self._on_settings)
+        menu.addAction(settings_action)
+
+        quit_action = QAction(self._action_icon("#9aa4b2"), "Quit", menu)
         quit_action.triggered.connect(self._on_exit)
         menu.addAction(quit_action)
 
@@ -77,6 +144,16 @@ class TrayController(QObject):
         self._show_logs_action.blockSignals(True)
         self._show_logs_action.setChecked(enabled)
         self._show_logs_action.blockSignals(False)
+
+    def set_compact_checked(self, enabled: bool) -> None:
+        self._compact_action.blockSignals(True)
+        self._compact_action.setChecked(enabled)
+        self._compact_action.blockSignals(False)
+
+    def set_cyber_checked(self, enabled: bool) -> None:
+        self._cyber_action.blockSignals(True)
+        self._cyber_action.setChecked(enabled)
+        self._cyber_action.blockSignals(False)
 
     def _on_activated(self, reason: QSystemTrayIcon.ActivationReason) -> None:
         if reason == QSystemTrayIcon.ActivationReason.Trigger:
@@ -125,12 +202,16 @@ class TrayController(QObject):
     def _asset_candidates() -> list[Path]:
         candidates: list[Path] = []
         local_assets = Path(__file__).resolve().parent / "assets"
+        candidates.append(local_assets / "tray-icon.svg")
+        candidates.append(local_assets / "tray-icon.png")
         candidates.append(local_assets / "app-icon.svg")
         candidates.append(local_assets / "app-icon.png")
 
         meipass = getattr(sys, "_MEIPASS", None)
         if meipass:
             bundled_assets = Path(str(meipass)) / "sonar_control" / "assets"
+            candidates.append(bundled_assets / "tray-icon.svg")
+            candidates.append(bundled_assets / "tray-icon.png")
             candidates.append(bundled_assets / "app-icon.svg")
             candidates.append(bundled_assets / "app-icon.png")
         return candidates
@@ -158,4 +239,20 @@ class TrayController(QObject):
         finally:
             painter.end()
         return QIcon(out)
+
+    @staticmethod
+    def _action_icon(color: str) -> QIcon:
+        size = 16
+        px = QPixmap(size, size)
+        px.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(px)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        try:
+            c = QColor(color)
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(c)
+            painter.drawRoundedRect(3, 3, 10, 10, 3, 3)
+        finally:
+            painter.end()
+        return QIcon(px)
 

@@ -1,5 +1,5 @@
 param(
-    [string]$Version = "0.1.1",
+    [string]$Version = "0.1.4",
     [switch]$Clean
 )
 
@@ -22,15 +22,7 @@ Write-Host "Installing/Updating build dependencies..."
 & $venvPython -m pip install --upgrade pyinstaller | Out-Host
 
 Write-Host "Building executable with PyInstaller..."
-& $venvPython -m PyInstaller `
-    --noconfirm `
-    --windowed `
-    --name SonarMixer `
-    --icon "$root\sonar_control\assets\app-icon.png" `
-    --add-data "$root\sonar_control\assets;sonar_control\assets" `
-    --collect-all PySide6 `
-    --collect-all steelseries_sonar_py `
-    "$root\app.py" | Out-Host
+& $venvPython -m PyInstaller --noconfirm "$root\SonarMixer.spec" | Out-Host
 
 $portableZip = Join-Path $root "dist\SonarMixer-Portable-$Version.zip"
 if (Test-Path $portableZip) {

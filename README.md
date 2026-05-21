@@ -13,6 +13,7 @@ Modern PySide6 system-tray flyout mixer for SteelSeries Sonar.
 - Per-channel output selection (routable channels)
 - App routing chips with drag/drop between channels
 - Local app alias support (e.g. `Gw2-64` -> `Guild Wars 2`)
+- **Cyberpunk theme** — toggleable HUD-style skin with chamfered panels, glow effects, hex values, and Rajdhani font
 
 ## Requirements
 
@@ -43,13 +44,13 @@ cd D:\Projects\AudioSwitcher\sonar-control-panel
 
 ```powershell
 cd D:\Projects\AudioSwitcher\sonar-control-panel
-.\build-installer.ps1 -Version 0.1.1
+.\build-installer.ps1 -Version 0.1.4
 ```
 
 Optional clean build:
 
 ```powershell
-.\build-installer.ps1 -Version 0.1.1 -Clean
+.\build-installer.ps1 -Version 0.1.4 -Clean
 ```
 
 Outputs:

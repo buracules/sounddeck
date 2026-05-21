@@ -8,6 +8,7 @@ __pycache__/
 run.out.log
 run.err.log
 ipc-capture.json
+ipc-capture-live.json
 
 # Build outputs
 build/
@@ -19,3 +20,5 @@ dist/
 Thumbs.db
 .idea/
 .vscode/
+.claude/
+sonar-mixer-handoff/
