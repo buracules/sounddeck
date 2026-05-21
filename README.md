@@ -2,7 +2,8 @@
 
 Modern PySide6 system-tray flyout mixer for SteelSeries Sonar.
 
-![Sonar Mixer Screenshot](docs/screenshot.jpg)
+![Sonar Mixer Screenshot](docs/screenshot.png)
+![Cyberpunk Theme](docs/cyber.png)
 
 ## Highlights
 
