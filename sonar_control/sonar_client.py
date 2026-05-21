@@ -35,6 +35,10 @@ class SonarClient:
 
         self._connected = True
 
+    def reset(self) -> None:
+        self._connected = False
+        self._api = None
+
     def _ensure(self) -> Any:
         if not self._connected:
             self.connect()

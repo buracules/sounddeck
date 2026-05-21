@@ -8,6 +8,8 @@ from urllib.request import Request, urlopen
 
 from .endpoints import discover_sonar_api_base
 
+_FALLBACK_BASE = "http://127.0.0.1:7011"
+
 
 @dataclass
 class AppSession:
@@ -117,5 +119,14 @@ class AudioRoutingClient:
         except HTTPError as exc:
             body = exc.read().decode("utf-8", errors="replace")
             raise RuntimeError(f"GET {path} failed ({exc.code}): {body[:220]}") from exc
-        except Exception as exc:
-            raise RuntimeError(f"GET {path} failed: {exc}") from exc
+        except Exception as first_exc:
+            # Sonar may have restarted on a different port — re-discover and retry once
+            new_base = discover_sonar_api_base(_FALLBACK_BASE)
+            if new_base != self._base_url:
+                self._base_url = new_base
+                try:
+                    with urlopen(Request(self._base_url + path, method="GET"), timeout=4) as resp:
+                        return json.loads(resp.read().decode("utf-8", errors="replace"))
+                except Exception as exc:
+                    raise RuntimeError(f"GET {path} failed: {exc}") from exc
+            raise RuntimeError(f"GET {path} failed: {first_exc}") from first_exc

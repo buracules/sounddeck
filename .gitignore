@@ -9,6 +9,7 @@ run.out.log
 run.err.log
 ipc-capture.json
 ipc-capture-live.json
+devices-probe.json
 
 # Build outputs
 build/

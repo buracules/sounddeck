@@ -4,6 +4,20 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog and this project follows Semantic Versioning.
 
+## [0.1.6] - 2026-05-21
+
+### Added
+- Dynamic channel mode: when SteelSeries GG / Sonar is not running, the mixer falls back to a single **Master** channel backed by the Windows default audio endpoint (via `pycaw`).
+- Automatic reconnect: polls every 5 seconds when Sonar is unavailable and switches back to the full 4-channel mixer as soon as Sonar comes back online.
+- `WindowsVolume` controller for Windows master volume and mute when in fallback mode.
+
+### Fixed
+- `AudioRoutingClient` and `SonarApiSwitcher` now re-discover Sonar's dynamic port on request failure, so app routing and device selection recover correctly after Sonar restarts.
+- App session listing no longer blocks channel display if the routing endpoint is temporarily unreachable.
+
+### Changed
+- `SonarClient.reset()` allows a clean reconnect after a connection failure without restarting the app.
+
 ## [0.1.5] - 2026-05-21
 
 ### Added

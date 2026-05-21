@@ -17,6 +17,7 @@ from .sonar_client import SonarClient
 from .startup import is_startup_enabled, set_startup_enabled
 from .tray import TrayController
 from .ui import FlyoutMixerWindow, SettingsWindow
+from .windows_volume import WindowsVolume
 
 
 class SonarControlApplication:
@@ -36,6 +37,8 @@ class SonarControlApplication:
         self._cyber_mode = bool(getattr(self._config, "cyber_mode", False))
         self._notifier = Notifier()
         self._client = SonarClient()
+        self._win_volume = WindowsVolume()
+        self._sonar_available = False
         self._api_switcher = SonarApiSwitcher()
         self._routing = AudioRoutingClient()
         self._levels = AudioLevelClient()
@@ -103,6 +106,7 @@ class SonarControlApplication:
         self.refresh_channels(show_toast=False)
         self._start_level_polling()
         self._start_battery_polling()
+        self._start_sonar_reconnect_polling()
         self._qapp.exec()
 
     def refresh_channels(self, show_toast: bool = False) -> None:
@@ -115,7 +119,10 @@ class SonarControlApplication:
                         selections[key] = self._api_switcher.get_selection(key)
                     except Exception:
                         selections[key] = None
-                sessions = self._routing.list_sessions()
+                try:
+                    sessions = self._routing.list_sessions()
+                except Exception:
+                    sessions = []
                 channel_apps: dict[str, list[tuple[str, str, str, str]]] = {"game": [], "chatRender": [], "media": []}
                 best_by_app: dict[str, tuple[int, str, str, str, str, str]] = {}
                 pid_label: dict[str, str] = {}
@@ -161,15 +168,25 @@ class SonarControlApplication:
                 session_options = list(pid_label.items())
                 if self.DEBUG_LOGS:
                     self._log_channel_apps(channel_apps)
+                was_unavailable = not self._sonar_available
+                self._sonar_available = True
                 self._window.dispatch(lambda: self._window.set_channels(channels))
                 self._window.dispatch(lambda s=selections: self._apply_device_selections(s))
                 self._window.dispatch(lambda opts=session_options: self._window.set_app_sessions(opts))
                 self._window.dispatch(lambda apps=channel_apps: self._window.set_channel_apps(apps))
-                self._window.dispatch(lambda: self._window.set_status(self._status("Connected")))
+                status = "Sonar connected" if was_unavailable else "Connected"
+                self._window.dispatch(lambda st=status: self._window.set_status(self._status(st)))
                 if show_toast:
                     self._notifier.show("Sonar", "Channel data refreshed")
             except Exception as exc:
-                msg = f"Error: {exc}"
+                self._sonar_available = False
+                self._client.reset()
+                with self._level_lock:
+                    self._channel_level_pids = {"game": [], "chatRender": [], "media": []}
+                if self._win_volume.available:
+                    channel = self._win_volume.get_state()
+                    self._window.dispatch(lambda ch=channel: self._window.set_channels([ch]))
+                msg = f"Sonar unavailable: {exc}"
                 self._window.dispatch(lambda m=msg: self._window.set_status(self._status(m)))
 
         threading.Thread(target=work, daemon=True).start()
@@ -190,11 +207,11 @@ class SonarControlApplication:
 
         def work() -> None:
             try:
-                self._client.set_volume(channel_key, value)
+                if not self._sonar_available and channel_key == "master":
+                    self._win_volume.set_volume(value)
+                else:
+                    self._client.set_volume(channel_key, value)
                 self._window.dispatch(lambda: self._window.set_status(self._status(f"{channel_key} volume {value}%")))
-                # Keep slider interaction local and smooth. A full refresh here can cause
-                # unrelated channels to jump while dragging (especially on master).
-                # Channel/state refresh remains available via explicit refresh actions.
             except Exception as exc:
                 msg = f"Volume error: {exc}"
                 self._window.dispatch(lambda m=msg: self._window.set_status(self._status(m)))
@@ -204,7 +221,10 @@ class SonarControlApplication:
     def toggle_mute(self, channel_key: str) -> None:
         def work() -> None:
             try:
-                muted = self._client.toggle_muted(channel_key)
+                if not self._sonar_available and channel_key == "master":
+                    muted = self._win_volume.toggle_mute()
+                else:
+                    muted = self._client.toggle_muted(channel_key)
                 self._window.dispatch(lambda: self._window.update_mute_state(channel_key, muted))
                 self._window.dispatch(
                     lambda: self._window.set_status(self._status(f"{channel_key} {'muted' if muted else 'unmuted'}"))
@@ -393,6 +413,17 @@ class SonarControlApplication:
 
     def _start_battery_polling(self) -> None:
         pass
+
+    def _start_sonar_reconnect_polling(self) -> None:
+        def work() -> None:
+            while self._alive:
+                # Fast retry when disconnected, slower health-check when connected
+                interval = 5.0 if not self._sonar_available else 15.0
+                threading.Event().wait(interval)
+                if self._alive:
+                    self.refresh_channels(show_toast=False)
+
+        threading.Thread(target=work, daemon=True).start()
 
     def toggle_logs_visibility(self, enabled: bool) -> None:
         self._show_logs = bool(enabled)

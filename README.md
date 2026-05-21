@@ -45,13 +45,13 @@ cd D:\Projects\AudioSwitcher\sonar-control-panel
 
 ```powershell
 cd D:\Projects\AudioSwitcher\sonar-control-panel
-.\build-installer.ps1 -Version 0.1.5
+.\build-installer.ps1 -Version 0.1.6
 ```
 
 Optional clean build:
 
 ```powershell
-.\build-installer.ps1 -Version 0.1.5 -Clean
+.\build-installer.ps1 -Version 0.1.6 -Clean
 ```
 
 Outputs:
