@@ -155,6 +155,16 @@ class TrayController(QObject):
         self._cyber_action.setChecked(enabled)
         self._cyber_action.blockSignals(False)
 
+    def set_battery(self, percent: int | None, charging: bool, device_name: str = "") -> None:
+        if percent is None:
+            self._tray.setToolTip("Sonar Mixer")
+            self._tray.setIcon(self._build_icon())
+            return
+        suffix = " — charging" if charging else ""
+        name_line = f"{device_name}\n" if device_name else ""
+        self._tray.setToolTip(f"Sonar Mixer\n{name_line}Battery: {percent}%{suffix}")
+        self._tray.setIcon(self._build_battery_icon(percent, charging))
+
     def _on_activated(self, reason: QSystemTrayIcon.ActivationReason) -> None:
         if reason == QSystemTrayIcon.ActivationReason.Trigger:
             self._last_trigger_at = monotonic()
@@ -170,6 +180,47 @@ class TrayController(QObject):
                 return
             self._on_refresh()
             self._on_toggle()
+
+    @staticmethod
+    def _build_battery_icon(percent: int, charging: bool) -> QIcon:
+        base = TrayController._build_icon().pixmap(32, 32)
+        out = QPixmap(32, 32)
+        out.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(out)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        try:
+            painter.drawPixmap(0, 0, base)
+
+            # Battery badge — bottom-right, medium size
+            bx, by, bw, bh = 14, 22, 16, 9
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor(10, 13, 20, 220))
+            painter.drawRoundedRect(bx - 2, by - 2, bw + 6, bh + 4, 3, 3)
+
+            # Battery body
+            painter.setBrush(QColor(38, 46, 60))
+            painter.drawRoundedRect(bx, by, bw, bh, 2, 2)
+            # Terminal nub (right side)
+            painter.drawRoundedRect(bx + bw, by + 3, 2, bh - 6, 1, 1)
+
+            if charging:
+                fill_color = QColor("#4cc2ff")
+            elif percent <= 20:
+                fill_color = QColor("#ff6f86")
+            elif percent <= 50:
+                fill_color = QColor("#ffb24a")
+            else:
+                fill_color = QColor("#48efaa")
+
+            fill_w = max(1, int((bw - 2) * percent / 100))
+            painter.setBrush(fill_color)
+            painter.drawRoundedRect(bx + 1, by + 1, fill_w, bh - 2, 1, 1)
+
+            # Coloured terminal nub
+            painter.drawRoundedRect(bx + bw, by + 3, 2, bh - 6, 1, 1)
+        finally:
+            painter.end()
+        return QIcon(out)
 
     @staticmethod
     def _build_icon() -> QIcon:

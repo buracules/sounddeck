@@ -407,12 +407,22 @@ class SonarControlApplication:
                 chg = info.charging if info else False
                 name = self._headset_battery.device_name
                 self._window.dispatch(lambda p=pct, c=chg, n=name: self._window.set_battery(p, c, n))
+                self._tray.set_battery(pct, chg, name)
             except Exception:
                 pass
         threading.Thread(target=work, daemon=True).start()
 
     def _start_battery_polling(self) -> None:
-        pass
+        if not self._headset_battery.available:
+            return
+
+        def work() -> None:
+            while self._alive:
+                threading.Event().wait(120.0)
+                if self._alive:
+                    self._poll_battery_once()
+
+        threading.Thread(target=work, daemon=True).start()
 
     def _start_sonar_reconnect_polling(self) -> None:
         def work() -> None:

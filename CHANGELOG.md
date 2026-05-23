@@ -4,6 +4,20 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog and this project follows Semantic Versioning.
 
+## [0.1.7] - 2026-05-23
+
+### Added
+- Battery level badge on the tray icon: a coloured mini battery shape (green ≥50 %, orange ≤50 %, red ≤20 %, blue when charging) appears in the bottom-right corner of the icon when a headset is detected.
+- Tray tooltip shows device name and battery percentage on hover.
+- Background battery polling every 120 seconds keeps the tray icon up to date even when the flyout is closed.
+- Flyout now has a draggable header bar — click and drag the "Sonar Mixer" title row to reposition the window anywhere on screen.
+- Flyout has its own × close button; Escape key still works too.
+- Flyout content is scrollable — channel strips are wrapped in a scroll area (max 430 px) so the panel stays compact even with many channels.
+
+### Changed
+- Flyout no longer closes when clicking outside; it stays open until explicitly dismissed via × button, Escape, or tray icon click.
+- Window type changed from `Tool` to `Window + WindowStaysOnTopHint` with `WS_EX_TOOLWINDOW` set via API, fixing the Qt auto-hide behaviour while keeping the panel off the taskbar.
+
 ## [0.1.6] - 2026-05-21
 
 ### Added

@@ -7,7 +7,7 @@ import ctypes
 from ctypes import wintypes
 
 from PySide6.QtCore import QEvent, QMimeData, QObject, QPoint, QRect, QRectF, QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QBrush, QColor, QCursor, QDrag, QFont, QFontMetrics, QGuiApplication, QLinearGradient, QPainter, QPainterPath, QPen, QPixmap, QIcon, QTransform
+from PySide6.QtGui import QBrush, QColor, QDrag, QFont, QFontMetrics, QGuiApplication, QLinearGradient, QPainter, QPainterPath, QPen, QPixmap, QIcon, QTransform
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QSlider,
     QStackedWidget,
+    QScrollArea,
     QStyledItemDelegate,
     QStyle,
     QVBoxLayout,
@@ -230,6 +231,18 @@ class _WindowCompositionAttribData(ctypes.Structure):
         ("Data", ctypes.c_void_p),
         ("SizeOfData", ctypes.c_size_t),
     ]
+
+
+def _hide_from_taskbar(hwnd: int) -> None:
+    try:
+        GWL_EXSTYLE = -20
+        WS_EX_TOOLWINDOW = 0x00000080
+        WS_EX_APPWINDOW = 0x00040000
+        ex_style = ctypes.windll.user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
+        ex_style = (ex_style | WS_EX_TOOLWINDOW) & ~WS_EX_APPWINDOW
+        ctypes.windll.user32.SetWindowLongW(hwnd, GWL_EXSTYLE, ex_style)
+    except Exception:
+        pass
 
 
 def _enable_windows_blur(hwnd: int) -> None:
@@ -1296,6 +1309,41 @@ class FlyoutChannelStrip(QFrame):
         return text or str(name)
 
 
+class _DraggableHeader(QWidget):
+    def __init__(self, parent_window: QWidget, on_close: Callable[[], None]) -> None:
+        super().__init__(parent_window)
+        self._parent_window = parent_window
+        self._drag_pos: QPoint | None = None
+        self.setObjectName("flyoutHeader")
+        self.setFixedHeight(28)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(4, 0, 2, 0)
+        layout.setSpacing(4)
+        title = QLabel("Sonar Mixer")
+        title.setObjectName("flyoutHeaderTitle")
+        layout.addWidget(title)
+        layout.addStretch(1)
+        close_btn = QPushButton("×")
+        close_btn.setObjectName("flyoutCloseBtn")
+        close_btn.setFixedSize(22, 22)
+        close_btn.clicked.connect(on_close)
+        layout.addWidget(close_btn)
+
+    def mousePressEvent(self, event) -> None:  # type: ignore[override]
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._drag_pos = event.globalPosition().toPoint() - self._parent_window.frameGeometry().topLeft()
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event) -> None:  # type: ignore[override]
+        if self._drag_pos is not None and event.buttons() & Qt.MouseButton.LeftButton:
+            self._parent_window.move(event.globalPosition().toPoint() - self._drag_pos)
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event) -> None:  # type: ignore[override]
+        self._drag_pos = None
+        super().mouseReleaseEvent(event)
+
+
 class FlyoutMixerWindow(QWidget):
     def __init__(
         self,
@@ -1309,7 +1357,11 @@ class FlyoutMixerWindow(QWidget):
     ) -> None:
         super().__init__(None)
         self.setWindowTitle("Sonar Mixer Flyout")
-        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Tool)
+        self.setWindowFlags(
+            Qt.WindowType.FramelessWindowHint |
+            Qt.WindowType.Window |
+            Qt.WindowType.WindowStaysOnTopHint
+        )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setFixedWidth(500)
@@ -1330,14 +1382,15 @@ class FlyoutMixerWindow(QWidget):
         self._compact_mode = False
         self._cyber_mode = False
         self._dispatcher = _UiDispatcher()
-        self._outside_filter_installed = False
 
         self._build_ui()
         self._apply_theme()
 
     def showEvent(self, event) -> None:  # type: ignore[override]
         super().showEvent(event)
-        _enable_windows_blur(int(self.winId()))
+        hwnd = int(self.winId())
+        _enable_windows_blur(hwnd)
+        _hide_from_taskbar(hwnd)
         if self._on_show:
             self._on_show()
 
@@ -1350,6 +1403,8 @@ class FlyoutMixerWindow(QWidget):
         panel_layout = QVBoxLayout(self._panel)
         panel_layout.setContentsMargins(10, 10, 10, 10)
         panel_layout.setSpacing(6)
+
+        panel_layout.addWidget(_DraggableHeader(parent_window=self, on_close=self.hide))
 
         self._hud_top = _CyberHudTop()
         self._hud_top.hide()
@@ -1377,11 +1432,22 @@ class FlyoutMixerWindow(QWidget):
         panel_layout.addWidget(self._shared_row)
 
         cards_host = QWidget()
+        cards_host.setAutoFillBackground(False)
         self._cards_layout = QVBoxLayout(cards_host)
         self._cards_layout.setContentsMargins(0, 0, 0, 0)
         self._cards_layout.setSpacing(5)
         self._cards_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
-        panel_layout.addWidget(cards_host)
+
+        self._cards_scroll = QScrollArea()
+        self._cards_scroll.setObjectName("flyoutCardsScroll")
+        self._cards_scroll.setWidgetResizable(True)
+        self._cards_scroll.setWidget(cards_host)
+        self._cards_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._cards_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self._cards_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self._cards_scroll.setAutoFillBackground(False)
+        self._cards_scroll.viewport().setAutoFillBackground(False)
+        panel_layout.addWidget(self._cards_scroll)
 
         self._status_label = QLabel("Ready")
         self._status_label.setObjectName("flyoutStatusLabel")
@@ -1585,6 +1651,54 @@ class FlyoutMixerWindow(QWidget):
                 font-size: 9px;
             }}
             QListWidget#channelChipList::item {{ padding: 0px; }}
+            QWidget#flyoutHeader {{
+                background: transparent;
+                border: none;
+            }}
+            QLabel#flyoutHeaderTitle {{
+                color: {Theme.TEXT_MUTED};
+                font-size: 10px;
+                font-weight: 600;
+                letter-spacing: 0.5px;
+            }}
+            QPushButton#flyoutCloseBtn {{
+                background: transparent;
+                border: none;
+                color: rgba(174, 183, 195, 100);
+                font-size: 18px;
+                border-radius: 5px;
+                padding: 0;
+            }}
+            QPushButton#flyoutCloseBtn:hover {{
+                background: rgba(255, 111, 134, 18);
+                color: #ff6f86;
+            }}
+            QScrollArea#flyoutCardsScroll {{
+                background: transparent;
+                border: none;
+            }}
+            QScrollArea#flyoutCardsScroll > QWidget {{
+                background: transparent;
+            }}
+            QScrollBar:vertical {{
+                background: transparent;
+                width: 5px;
+                margin: 0;
+            }}
+            QScrollBar::handle:vertical {{
+                background: rgba(255, 255, 255, 35);
+                border-radius: 2px;
+                min-height: 20px;
+            }}
+            QScrollBar::handle:vertical:hover {{
+                background: rgba(255, 255, 255, 55);
+            }}
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
+                height: 0;
+            }}
+            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{
+                background: none;
+            }}
             QWidget#cyberHudTop, QWidget#cyberHudBottom {{
                 background: transparent;
             }}
@@ -1983,20 +2097,71 @@ class FlyoutMixerWindow(QWidget):
                 font-size: 8px;
             }}
             QListWidget#channelChipList::item {{ padding: 0px; }}
+            QWidget#flyoutHeader {{
+                background: transparent;
+                border: none;
+            }}
+            QLabel#flyoutHeaderTitle {{
+                color: rgba(0, 240, 255, 140);
+                font-size: 10px;
+                font-weight: 700;
+                letter-spacing: 1.5px;
+            }}
+            QPushButton#flyoutCloseBtn {{
+                background: transparent;
+                border: none;
+                color: rgba(0, 240, 255, 100);
+                font-size: 18px;
+                border-radius: 0px;
+                padding: 0;
+            }}
+            QPushButton#flyoutCloseBtn:hover {{
+                background: rgba(255, 45, 138, 22);
+                color: {CyberTheme.PINK};
+            }}
+            QScrollArea#flyoutCardsScroll {{
+                background: transparent;
+                border: none;
+            }}
+            QScrollArea#flyoutCardsScroll > QWidget {{
+                background: transparent;
+            }}
+            QScrollBar:vertical {{
+                background: transparent;
+                width: 4px;
+                margin: 0;
+            }}
+            QScrollBar::handle:vertical {{
+                background: rgba(0, 240, 255, 60);
+                border-radius: 2px;
+                min-height: 20px;
+            }}
+            QScrollBar::handle:vertical:hover {{
+                background: rgba(0, 240, 255, 100);
+            }}
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
+                height: 0;
+            }}
+            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{
+                background: none;
+            }}
             """
         )
 
     def _apply_window_height(self) -> None:
+        MAX_SCROLL_H = 430
         rows = list(self._cards.values())
         if rows:
             rows_h = sum(card.height() for card in rows) + max(0, len(rows) - 1) * 5
         else:
             rows_h = 58 if self._compact_mode else 74
-        # 16px root margins (8+8) + 20px panel margins (10+10) = 36 base
+        scroll_h = min(rows_h, MAX_SCROLL_H)
+        self._cards_scroll.setFixedHeight(scroll_h)
+        # 36 base (margins) + 34 header (28px + 6px layout spacing)
         extra = (30 + 6) if not self._shared_row.isHidden() else 0
         status_extra = 20 if self._status_label.isVisible() else 0
         hud_extra = (20 + 6 + 18 + 6) if self._cyber_mode else 0
-        self.setFixedHeight(36 + extra + rows_h + status_extra + hud_extra)
+        self.setFixedHeight(70 + extra + scroll_h + status_extra + hud_extra)
 
     def set_battery(self, percent: int | None, charging: bool = False, headset_name: str = "") -> None:
         self._last_battery = (percent, charging, headset_name)
@@ -2109,7 +2274,6 @@ class FlyoutMixerWindow(QWidget):
         self.raise_()
         self.activateWindow()
         self.setFocus(Qt.FocusReason.ActiveWindowFocusReason)
-        self._install_outside_filter()
 
     def toggle_near(self, tray_rect: QRect | None) -> None:
         if self.isVisible():
@@ -2138,44 +2302,9 @@ class FlyoutMixerWindow(QWidget):
 
     def hideEvent(self, event) -> None:  # type: ignore[override]
         super().hideEvent(event)
-        self._remove_outside_filter()
 
     def changeEvent(self, event) -> None:  # type: ignore[override]
         super().changeEvent(event)
-        if event.type() == QEvent.Type.ActivationChange:
-            if not self.isActiveWindow() and QApplication.activePopupWidget() is None:
-                # If the cursor is still within our frame geometry the deactivation
-                # was caused by a transparent-corner click (WM_NCHITTEST miss).
-                # Re-activate so the flyout stays open; real outside clicks land
-                # with the cursor outside our rect and will fall through to hide().
-                if self.frameGeometry().contains(QCursor.pos()):
-                    self.activateWindow()
-                    return
-                self.hide()
-
-    def eventFilter(self, watched: QObject, event: QEvent) -> bool:
-        if watched is QApplication.instance() and self.isVisible():
-            if QApplication.activePopupWidget() is not None:
-                return super().eventFilter(watched, event)
-            if event.type() == QEvent.Type.MouseButtonPress:
-                pos = event.globalPosition().toPoint()  # type: ignore[attr-defined]
-                if not self.frameGeometry().contains(pos):
-                    self.hide()
-        return super().eventFilter(watched, event)
-
-    def _install_outside_filter(self) -> None:
-        app = QApplication.instance()
-        if app is None or self._outside_filter_installed:
-            return
-        app.installEventFilter(self)
-        self._outside_filter_installed = True
-
-    def _remove_outside_filter(self) -> None:
-        app = QApplication.instance()
-        if app is None or not self._outside_filter_installed:
-            return
-        app.removeEventFilter(self)
-        self._outside_filter_installed = False
 
 
 class SettingsWindow(QDialog):
@@ -2264,7 +2393,7 @@ class SettingsWindow(QDialog):
             self._tab_buttons[key] = button
             self._stack.addWidget(page)
         sidebar_layout.addStretch(1)
-        version = QLabel("v0.1.3")
+        version = QLabel("v0.1.7")
         version.setObjectName("settingsVersion")
         sidebar_layout.addWidget(version)
         self._select_tab(0, "general")
