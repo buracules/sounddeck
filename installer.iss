@@ -1,11 +1,11 @@
-#define MyAppName "Sonar Mixer"
+#define MyAppName "SoundDeck"
 #ifndef MyAppVersion
-  #define MyAppVersion "0.1.6"
+  #define MyAppVersion "0.1.7"
 #endif
-#define MyAppPublisher "Sonar Mixer Contributors"
-#define MyAppExeName "SonarMixer.exe"
+#define MyAppPublisher "SoundDeck Contributors"
+#define MyAppExeName "SoundDeck.exe"
 #ifndef MyAppSourceDir
-  #define MyAppSourceDir "dist\\SonarMixer"
+  #define MyAppSourceDir "dist\\SoundDeck"
 #endif
 
 [Setup]
@@ -17,7 +17,7 @@ DefaultDirName={autopf}\{#MyAppName}
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
 OutputDir=dist
-OutputBaseFilename=SonarMixer-Setup-{#MyAppVersion}
+OutputBaseFilename=SoundDeck-Setup-{#MyAppVersion}
 Compression=lzma
 SolidCompression=yes
 WizardStyle=modern

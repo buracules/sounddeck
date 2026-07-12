@@ -4,8 +4,8 @@ import argparse
 import json
 from pathlib import Path
 
-from sonar_control.application import SonarControlApplication
-from sonar_control.ipc_probe import SonarIpcProbe
+from sounddeck.application import SonarControlApplication
+from sounddeck.ipc_probe import SonarIpcProbe
 
 
 def main() -> None:

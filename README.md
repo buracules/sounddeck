@@ -1,31 +1,33 @@
-# Sonar Control Panel
+# SoundDeck
 
-Modern PySide6 system-tray flyout mixer for SteelSeries Sonar.
+Modern PySide6 system-tray flyout mixer for Windows, with optional SteelSeries Sonar integration.
 
-![Sonar Mixer Screenshot](docs/screenshot.png)
+![SoundDeck Screenshot](docs/screenshot.png)
 ![Cyberpunk Theme](docs/cyber.png)
 
 ## Highlights
 
 - Tray-first UX (`QSystemTrayIcon`) with flyout mixer panel
-- Frameless dark gaming-style UI
+- Frameless dark gaming-style UI — **Cyberpunk theme on by default**
 - Channels: `MASTER`, `GAME`, `CHAT`, `MEDIA`
 - Per-channel volume and mute
 - Per-channel output selection (routable channels)
 - App routing chips with drag/drop between channels
 - Local app alias support (e.g. `Gw2-64` -> `Guild Wars 2`)
-- **Cyberpunk theme** — toggleable HUD-style skin with chamfered panels, glow effects, hex values, and Rajdhani font
+- Works without SteelSeries: when Sonar isn't running, shows the Windows Master strip plus a per-app volume/mute mixer for every running app (via `pycaw` Core Audio sessions — no virtual audio driver needed)
+- Headset battery badge on the tray icon (SteelSeries Arctis via HID)
+- Settings window: theme, "close on click outside", "lock window position", compact view, startup, status line
 
 ## Requirements
 
 - Windows 10/11
 - Python 3.11+
-- SteelSeries GG / Sonar running
+- SteelSeries GG / Sonar (optional — enables the full 4-channel mixer and per-app routing)
 
 ## Installation
 
 ```powershell
-cd D:\Projects\AudioSwitcher\sonar-control-panel
+cd sonar-control-panel
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install -r requirements.txt
@@ -34,7 +36,7 @@ python -m pip install -r requirements.txt
 ## Run
 
 ```powershell
-cd D:\Projects\AudioSwitcher\sonar-control-panel
+cd sonar-control-panel
 .\.venv\Scripts\python app.py
 ```
 
@@ -44,21 +46,21 @@ cd D:\Projects\AudioSwitcher\sonar-control-panel
 2. Build app + setup:
 
 ```powershell
-cd D:\Projects\AudioSwitcher\sonar-control-panel
-.\build-installer.ps1 -Version 0.1.6
+cd sonar-control-panel
+.\build-installer.ps1 -Version 0.1.7
 ```
 
 Optional clean build:
 
 ```powershell
-.\build-installer.ps1 -Version 0.1.6 -Clean
+.\build-installer.ps1 -Version 0.1.7 -Clean
 ```
 
 Outputs:
 
-- App folder: `dist\SonarMixer\`
-- Portable: `dist\SonarMixer-Portable-<version>.zip`
-- Installer: `dist\SonarMixer-Setup-<version>.exe`
+- App folder: `dist\SoundDeck\`
+- Portable: `dist\SoundDeck-Portable-<version>.zip`
+- Installer: `dist\SoundDeck-Setup-<version>.exe`
 
 ## CLI Utilities
 
@@ -75,13 +77,15 @@ Outputs:
 ```text
 app.py
 requirements.txt
-sonar_control/
+sounddeck/
   application.py       # app orchestration
   ui.py                # flyout UI and widgets
   tray.py              # Qt tray integration
   sonar_client.py      # sonar volume/mute wrapper
   sonar_api_switcher.py# output device selection
   audio_routing.py     # process routing
+  windows_volume.py    # Windows master fallback volume (no Sonar)
+  windows_apps.py      # per-app volume/mute mixer (no Sonar)
   assets/              # svg/png icons
 ```
 

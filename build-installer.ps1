@@ -1,5 +1,5 @@
 param(
-    [string]$Version = "0.1.6",
+    [string]$Version = "0.1.7",
     [switch]$Clean
 )
 
@@ -14,23 +14,23 @@ if (-not (Test-Path $venvPython)) {
 
 if ($Clean) {
     Remove-Item -Recurse -Force "$root\build" -ErrorAction SilentlyContinue
-    Remove-Item -Recurse -Force "$root\dist\SonarMixer" -ErrorAction SilentlyContinue
-    Remove-Item -Force "$root\dist\SonarMixer-Portable-$Version.zip" -ErrorAction SilentlyContinue
+    Remove-Item -Recurse -Force "$root\dist\SoundDeck" -ErrorAction SilentlyContinue
+    Remove-Item -Force "$root\dist\SoundDeck-Portable-$Version.zip" -ErrorAction SilentlyContinue
 }
 
 Write-Host "Installing/Updating build dependencies..."
 & $venvPython -m pip install --upgrade pyinstaller | Out-Host
 
 Write-Host "Building executable with PyInstaller..."
-& $venvPython -m PyInstaller --noconfirm "$root\SonarMixer.spec" | Out-Host
+& $venvPython -m PyInstaller --noconfirm "$root\SoundDeck.spec" | Out-Host
 
-$portableZip = Join-Path $root "dist\SonarMixer-Portable-$Version.zip"
+$portableZip = Join-Path $root "dist\SoundDeck-Portable-$Version.zip"
 if (Test-Path $portableZip) {
     Remove-Item -Force $portableZip
 }
 
 Write-Host "Building portable zip..."
-Compress-Archive -Path "$root\dist\SonarMixer\*" -DestinationPath $portableZip -CompressionLevel Optimal
+Compress-Archive -Path "$root\dist\SoundDeck\*" -DestinationPath $portableZip -CompressionLevel Optimal
 
 $isccCandidates = @(
     "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe",
@@ -47,6 +47,6 @@ Write-Host "Building installer with Inno Setup..."
 
 Write-Host ""
 Write-Host "Done."
-Write-Host "Folder build output: $root\dist\SonarMixer"
-Write-Host "Portable output:     $root\dist\SonarMixer-Portable-$Version.zip"
-Write-Host "Installer output:    $root\dist\SonarMixer-Setup-$Version.exe"
+Write-Host "Folder build output: $root\dist\SoundDeck"
+Write-Host "Portable output:     $root\dist\SoundDeck-Portable-$Version.zip"
+Write-Host "Installer output:    $root\dist\SoundDeck-Setup-$Version.exe"

@@ -2,3 +2,5 @@ steelseries-sonar-py>=0.0.6
 win10toast>=0.9
 PySide6>=6.7.0
 pycaw
+comtypes
+hidapi

@@ -8,7 +8,9 @@ if sys.platform == "win32":
 
 
 RUN_KEY_PATH = r"Software\Microsoft\Windows\CurrentVersion\Run"
-RUN_VALUE_NAME = "SonarMixer"
+RUN_VALUE_NAME = "SoundDeck"
+# Previous names this app registered under; cleaned up on any startup write.
+LEGACY_VALUE_NAMES = ("SonarMixer",)
 
 
 def launch_command() -> str:
@@ -39,6 +41,12 @@ def set_startup_enabled(enabled: bool) -> None:
         return
 
     with winreg.OpenKey(winreg.HKEY_CURRENT_USER, RUN_KEY_PATH, 0, winreg.KEY_SET_VALUE) as key:
+        # Remove any stale entries left by previous app names.
+        for legacy in LEGACY_VALUE_NAMES:
+            try:
+                winreg.DeleteValue(key, legacy)
+            except FileNotFoundError:
+                pass
         if enabled:
             winreg.SetValueEx(key, RUN_VALUE_NAME, 0, winreg.REG_SZ, launch_command())
             return

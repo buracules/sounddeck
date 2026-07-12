@@ -4,6 +4,20 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog and this project follows Semantic Versioning.
 
+## [0.1.8] - 2026-07-12
+
+### Changed
+- **Rebranded from "Sonar Mixer" to "SoundDeck"** — repositioned as a general Windows tray mixer that integrates with SteelSeries Sonar when available (window titles, tray, About, startup registry value, installer, executable name). SteelSeries Sonar is now optional. Old `SonarMixer` startup registry entry is cleaned up automatically.
+- **Cyberpunk theme is now the default** for new installs (existing configs keep their choice).
+
+### Added
+- **Per-app mixer without SteelSeries** — when Sonar isn't running, the flyout now shows the Windows Master strip plus a scrollable list of every running app's own volume slider and mute (driven directly through Windows Core Audio sessions via `pycaw`, no virtual audio driver required). Replaces the previous Master-only fallback.
+- Settings toggles: **Close on click outside** (hide the flyout when clicking anywhere outside) and **Lock window position** (disable header dragging).
+- `hidapi` and `comtypes` are now listed explicitly in `requirements.txt` (previously `hidapi` was a silent optional dependency, so the battery indicator did not work on clean installs).
+
+### Fixed
+- **Idle CPU usage** — audio peak metering now only runs while the flyout is visible. Previously the audio stack was polled ~12×/second even when the panel was hidden in the tray, causing constant ~3% CPU. Hidden state is now near-idle.
+
 ## [0.1.7] - 2026-05-23
 
 ### Added

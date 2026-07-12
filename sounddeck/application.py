@@ -17,7 +17,8 @@ from .sonar_client import SonarClient
 from .startup import is_startup_enabled, set_startup_enabled
 from .tray import TrayController
 from .ui import FlyoutMixerWindow, SettingsWindow
-from .windows_volume import WindowsVolume
+from .windows_apps import WindowsAppVolumes
+from .windows_volume import WindowsMic, WindowsVolume
 
 
 class SonarControlApplication:
@@ -34,10 +35,14 @@ class SonarControlApplication:
     def __init__(self, compact_mode: bool = True) -> None:
         self._config: AppConfig = load_config()
         self._compact_mode = bool(getattr(self._config, "compact_mode", compact_mode))
-        self._cyber_mode = bool(getattr(self._config, "cyber_mode", False))
+        self._cyber_mode = bool(getattr(self._config, "cyber_mode", True))
+        self._close_on_outside = bool(getattr(self._config, "close_on_outside", False))
+        self._lock_position = bool(getattr(self._config, "lock_position", False))
         self._notifier = Notifier()
         self._client = SonarClient()
         self._win_volume = WindowsVolume()
+        self._app_volumes = WindowsAppVolumes()
+        self._mic = WindowsMic()
         self._sonar_available = False
         self._api_switcher = SonarApiSwitcher()
         self._routing = AudioRoutingClient()
@@ -53,14 +58,23 @@ class SonarControlApplication:
             on_device_select=self.select_device,
             on_route_app=self.route_app_beta,
             on_customize_app=self.customize_app,
-            on_show=self._poll_battery_once,
+            on_show=self._on_window_shown,
+            on_hide=self._on_window_hidden,
+            on_app_volume_change=self.set_app_volume,
+            on_app_toggle_mute=self.toggle_app_mute,
+            on_mic_volume_change=self.set_mic_volume,
+            on_mic_toggle_mute=self.toggle_mic_mute,
         )
+        self._pending_app_volume_jobs: dict[int, threading.Timer] = {}
 
         self._pending_volume_jobs: dict[str, threading.Timer] = {}
         self._volume_job_lock = threading.Lock()
         self._app_activity_lock = threading.Lock()
         self._app_last_active: dict[str, float] = {}
         self._level_lock = threading.Lock()
+        # Set while the flyout is visible; gates the (relatively expensive) level polling
+        # so a hidden tray app sits near-idle instead of burning CPU on peak reads.
+        self._levels_visible = threading.Event()
         self._channel_level_pids: dict[str, list[int]] = {"game": [], "chatRender": [], "media": []}
         self._show_logs = False
         self._alive = True
@@ -70,6 +84,8 @@ class SonarControlApplication:
             on_toggle_logs=self.toggle_logs_visibility,
             config_path=str(config_file_path()),
             on_toggle_cyber=self.toggle_cyber_mode,
+            on_toggle_close_outside=self.toggle_close_on_outside,
+            on_toggle_lock_position=self.toggle_lock_position,
         )
 
         self._tray = TrayController(
@@ -90,8 +106,10 @@ class SonarControlApplication:
         self._window.set_logs_visible(self._show_logs)
         if self._cyber_mode:
             self._window.set_cyber_mode(True)
+        self._window.set_close_on_outside(self._close_on_outside)
+        self._window.set_position_locked(self._lock_position)
         self._window.hide()
-        self._settings.set_states(is_startup_enabled(), self._compact_mode, self._show_logs, self._cyber_mode)
+        self._push_settings_states()
 
     @staticmethod
     def _load_bundled_fonts() -> None:
@@ -174,6 +192,9 @@ class SonarControlApplication:
                 self._window.dispatch(lambda s=selections: self._apply_device_selections(s))
                 self._window.dispatch(lambda opts=session_options: self._window.set_app_sessions(opts))
                 self._window.dispatch(lambda apps=channel_apps: self._window.set_channel_apps(apps))
+                # Sonar drives the real channels here — hide the per-app fallback mixer.
+                self._window.dispatch(lambda: self._window.set_app_volumes([]))
+                self._window.dispatch(lambda: self._window.set_mic(None))
                 status = "Sonar connected" if was_unavailable else "Connected"
                 self._window.dispatch(lambda st=status: self._window.set_status(self._status(st)))
                 if show_toast:
@@ -186,6 +207,14 @@ class SonarControlApplication:
                 if self._win_volume.available:
                     channel = self._win_volume.get_state()
                     self._window.dispatch(lambda ch=channel: self._window.set_channels([ch]))
+                # Sonar-independent mixer: list every app's own volume/mute.
+                try:
+                    apps = self._app_volumes.list_apps()
+                except Exception:
+                    apps = []
+                self._window.dispatch(lambda a=apps: self._window.set_app_volumes(a))
+                mic_state = self._mic.get_state() if self._mic.available else None
+                self._window.dispatch(lambda m=mic_state: self._window.set_mic(m))
                 msg = f"Sonar unavailable: {exc}"
                 self._window.dispatch(lambda m=msg: self._window.set_status(self._status(m)))
 
@@ -232,6 +261,67 @@ class SonarControlApplication:
                 self._notifier.show("Sonar", f"{channel_key} {'muted' if muted else 'unmuted'}")
             except Exception as exc:
                 msg = f"Mute error: {exc}"
+                self._window.dispatch(lambda m=msg: self._window.set_status(self._status(m)))
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def set_app_volume(self, pid: int, value: int) -> None:
+        with self._volume_job_lock:
+            pending = self._pending_app_volume_jobs.pop(pid, None)
+            if pending:
+                pending.cancel()
+            timer = threading.Timer(0.05, lambda: self._set_app_volume_now(pid, value))
+            timer.daemon = True
+            self._pending_app_volume_jobs[pid] = timer
+            timer.start()
+
+    def _set_app_volume_now(self, pid: int, value: int) -> None:
+        with self._volume_job_lock:
+            self._pending_app_volume_jobs.pop(pid, None)
+
+        def work() -> None:
+            try:
+                self._app_volumes.set_volume(pid, value)
+            except Exception as exc:
+                msg = f"App volume error: {exc}"
+                self._window.dispatch(lambda m=msg: self._window.set_status(self._status(m)))
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def toggle_app_mute(self, pid: int) -> None:
+        def work() -> None:
+            try:
+                muted = self._app_volumes.toggle_mute(pid)
+                self._window.dispatch(lambda p=pid, m=muted: self._window.update_app_mute(p, m))
+            except Exception as exc:
+                msg = f"App mute error: {exc}"
+                self._window.dispatch(lambda m=msg: self._window.set_status(self._status(m)))
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def set_mic_volume(self, value: int) -> None:
+        # Reuse the app-volume debounce map with the mic sentinel key (-1).
+        with self._volume_job_lock:
+            pending = self._pending_app_volume_jobs.pop(-1, None)
+            if pending:
+                pending.cancel()
+            timer = threading.Timer(0.05, lambda: self._set_mic_volume_now(value))
+            timer.daemon = True
+            self._pending_app_volume_jobs[-1] = timer
+            timer.start()
+
+    def _set_mic_volume_now(self, value: int) -> None:
+        with self._volume_job_lock:
+            self._pending_app_volume_jobs.pop(-1, None)
+        threading.Thread(target=lambda: self._mic.set_volume(value), daemon=True).start()
+
+    def toggle_mic_mute(self) -> None:
+        def work() -> None:
+            try:
+                muted = self._mic.toggle_mute()
+                self._window.dispatch(lambda m=muted: self._window.update_mic_mute(m))
+            except Exception as exc:
+                msg = f"Mic mute error: {exc}"
                 self._window.dispatch(lambda m=msg: self._window.set_status(self._status(m)))
 
         threading.Thread(target=work, daemon=True).start()
@@ -317,7 +407,7 @@ class SonarControlApplication:
         self._window.toggle_near(self._tray.geometry())
 
     def show_settings(self) -> None:
-        self._window.dispatch(lambda: self._settings.set_states(is_startup_enabled(), self._compact_mode, self._show_logs, self._cyber_mode))
+        self._window.dispatch(self._push_settings_states)
         self._window.dispatch(self._settings.show_window)
 
     def toggle_startup_with_windows(self, enabled: bool) -> None:
@@ -326,7 +416,7 @@ class SonarControlApplication:
                 set_startup_enabled(enabled)
                 actual = is_startup_enabled()
                 self._window.dispatch(lambda: self._tray.set_startup_checked(actual))
-                self._window.dispatch(lambda: self._settings.set_states(actual, self._compact_mode, self._show_logs, self._cyber_mode))
+                self._window.dispatch(self._push_settings_states)
                 state = "enabled" if actual else "disabled"
                 self._window.dispatch(lambda: self._window.set_status(self._status(f"startup {state}")))
                 self._notifier.show("Sonar", f"Start with Windows {state}")
@@ -334,7 +424,7 @@ class SonarControlApplication:
                 msg = f"Startup toggle error: {exc}"
                 self._window.dispatch(lambda m=msg: self._window.set_status(self._status(m)))
                 self._window.dispatch(lambda: self._tray.set_startup_checked(is_startup_enabled()))
-                self._window.dispatch(lambda: self._settings.set_states(is_startup_enabled(), self._compact_mode, self._show_logs, self._cyber_mode))
+                self._window.dispatch(self._push_settings_states)
 
         threading.Thread(target=work, daemon=True).start()
 
@@ -373,6 +463,12 @@ class SonarControlApplication:
 
         def work() -> None:
             while self._alive:
+                # Peak meters are only visible while the flyout is open. When it is
+                # hidden (the usual tray state), block cheaply instead of polling the
+                # audio stack ~12x/sec. wait() returns early the moment it is shown.
+                if not self._levels_visible.is_set():
+                    self._levels_visible.wait(0.5)
+                    continue
                 try:
                     levels = self._levels.read_levels()
                     by_pid = levels.by_pid or {}
@@ -385,6 +481,8 @@ class SonarControlApplication:
                         "media": self._aggregate_pid_levels(channel_pids.get("media", []), by_pid),
                     }
                     self._window.dispatch(lambda lv=channel_levels: self._window.set_channel_levels(lv))
+                    # Per-app meters for the Sonar-independent mixer (no-op when no app rows).
+                    self._window.dispatch(lambda bp=by_pid: self._window.set_app_levels(bp))
                 except Exception:
                     pass
                 threading.Event().wait(0.08)
@@ -396,6 +494,25 @@ class SonarControlApplication:
         if not pids:
             return 0.0
         return max((by_pid.get(pid, 0.0) for pid in pids), default=0.0)
+
+    def _on_window_shown(self) -> None:
+        # Resume level metering and refresh battery when the flyout opens.
+        self._levels_visible.set()
+        self._poll_battery_once()
+
+    def _on_window_hidden(self) -> None:
+        # Pause level metering while hidden to keep the tray app near-idle.
+        self._levels_visible.clear()
+
+    def _push_settings_states(self) -> None:
+        self._settings.set_states(
+            is_startup_enabled(),
+            self._compact_mode,
+            self._show_logs,
+            self._cyber_mode,
+            self._close_on_outside,
+            self._lock_position,
+        )
 
     def _poll_battery_once(self) -> None:
         if not self._headset_battery.available:
@@ -439,13 +556,13 @@ class SonarControlApplication:
         self._show_logs = bool(enabled)
         self._window.dispatch(lambda: self._window.set_logs_visible(self._show_logs))
         self._tray.set_show_logs_checked(self._show_logs)
-        self._settings.set_states(is_startup_enabled(), self._compact_mode, self._show_logs, self._cyber_mode)
+        self._push_settings_states()
 
     def toggle_compact_mode(self, enabled: bool) -> None:
         self._compact_mode = bool(enabled)
         self._window.dispatch(lambda: self._window.set_compact(self._compact_mode))
         self._tray.set_compact_checked(self._compact_mode)
-        self._settings.set_states(is_startup_enabled(), self._compact_mode, self._show_logs, self._cyber_mode)
+        self._push_settings_states()
         self._config.compact_mode = self._compact_mode
         save_config(self._config)
 
@@ -454,6 +571,20 @@ class SonarControlApplication:
         self._window.dispatch(lambda: self._window.set_cyber_mode(self._cyber_mode))
         self._tray.set_cyber_checked(self._cyber_mode)
         self._config.cyber_mode = self._cyber_mode
+        save_config(self._config)
+
+    def toggle_close_on_outside(self, enabled: bool) -> None:
+        self._close_on_outside = bool(enabled)
+        self._window.dispatch(lambda: self._window.set_close_on_outside(self._close_on_outside))
+        self._push_settings_states()
+        self._config.close_on_outside = self._close_on_outside
+        save_config(self._config)
+
+    def toggle_lock_position(self, enabled: bool) -> None:
+        self._lock_position = bool(enabled)
+        self._window.dispatch(lambda: self._window.set_position_locked(self._lock_position))
+        self._push_settings_states()
+        self._config.lock_position = self._lock_position
         save_config(self._config)
 
     def exit_app(self) -> None:
@@ -466,6 +597,9 @@ class SonarControlApplication:
                 for timer in self._pending_volume_jobs.values():
                     timer.cancel()
                 self._pending_volume_jobs.clear()
+                for timer in self._pending_app_volume_jobs.values():
+                    timer.cancel()
+                self._pending_app_volume_jobs.clear()
             self._tray.stop()
             self._window.close()
             self._settings.close()

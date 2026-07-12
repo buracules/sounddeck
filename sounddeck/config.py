@@ -8,7 +8,9 @@ from pathlib import Path
 @dataclass
 class AppConfig:
     compact_mode: bool = True
-    cyber_mode: bool = False
+    cyber_mode: bool = True
+    close_on_outside: bool = False
+    lock_position: bool = False
     app_overrides: dict[str, dict[str, str]] | None = None
 
 
@@ -32,7 +34,9 @@ def load_config() -> AppConfig:
             app_overrides = {}
         return AppConfig(
             compact_mode=bool(data.get("compact_mode", True)),
-            cyber_mode=bool(data.get("cyber_mode", False)),
+            cyber_mode=bool(data.get("cyber_mode", True)),
+            close_on_outside=bool(data.get("close_on_outside", False)),
+            lock_position=bool(data.get("lock_position", False)),
             app_overrides={
                 str(key): {str(k): str(v) for k, v in value.items() if isinstance(v, str)}
                 for key, value in app_overrides.items()
@@ -48,6 +52,8 @@ def save_config(config: AppConfig) -> None:
     payload = {
         "compact_mode": config.compact_mode,
         "cyber_mode": config.cyber_mode,
+        "close_on_outside": config.close_on_outside,
+        "lock_position": config.lock_position,
         "app_overrides": config.app_overrides or {},
     }
     path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
