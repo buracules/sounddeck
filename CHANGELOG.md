@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog and this project follows Semantic Versioning.
 
+## [0.1.9] - 2026-07-13
+
+### Fixed
+- Closed apps no longer linger in the per-app mixer. Windows keeps an app's audio session in an "Expired" state for a while after it exits; those sessions (and any whose process is no longer running) are now filtered out.
+
+### Changed
+- The flyout now refreshes its channel/app list immediately when opened, instead of waiting for the next background poll — closed apps disappear as soon as you open it.
+- Refreshed README with current screenshots (per-app mixer + microphone section, cyan master), a side-by-side theme preview, and a downloads section.
+
 ## [0.1.8] - 2026-07-12
 
 ### Changed

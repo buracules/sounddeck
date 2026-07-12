@@ -55,6 +55,13 @@ class WindowsAppVolumes:
                 volume = session.SimpleAudioVolume
                 if volume is None:
                     continue
+                # A closed app's session lingers as "Expired" (state 2) until Windows
+                # releases it — skip those so closed apps drop out of the list.
+                try:
+                    if int(session.State) == 2:
+                        continue
+                except Exception:
+                    pass
                 process = getattr(session, "Process", None)
                 pid = int(getattr(process, "pid", 0) or 0)
                 if pid <= 0:
@@ -62,6 +69,12 @@ class WindowsAppVolumes:
                     continue
                 if pid in by_pid:
                     continue
+                # Belt-and-suspenders: drop sessions whose process is gone.
+                try:
+                    if process is not None and not process.is_running():
+                        continue
+                except Exception:
+                    pass
                 name = self._display_name(session, process, pid)
                 level = int(round(self._clamp01(volume.GetMasterVolume()) * 100))
                 muted = bool(volume.GetMute())

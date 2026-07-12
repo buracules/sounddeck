@@ -496,9 +496,11 @@ class SonarControlApplication:
         return max((by_pid.get(pid, 0.0) for pid in pids), default=0.0)
 
     def _on_window_shown(self) -> None:
-        # Resume level metering and refresh battery when the flyout opens.
+        # Resume level metering, refresh battery, and pull a fresh channel/app
+        # snapshot when the flyout opens (so closed apps drop out immediately).
         self._levels_visible.set()
         self._poll_battery_once()
+        self.refresh_channels(show_toast=False)
 
     def _on_window_hidden(self) -> None:
         # Pause level metering while hidden to keep the tray app near-idle.

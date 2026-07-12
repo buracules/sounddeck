@@ -2837,7 +2837,7 @@ class SettingsWindow(QDialog):
             self._tab_buttons[key] = button
             self._stack.addWidget(page)
         sidebar_layout.addStretch(1)
-        version = QLabel("v0.1.8")
+        version = QLabel("v0.1.9")
         version.setObjectName("settingsVersion")
         sidebar_layout.addWidget(version)
         self._select_tab(0, "general")
