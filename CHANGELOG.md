@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog and this project follows Semantic Versioning.
 
+## [0.2.0] - 2026-07-13
+
+### Added
+- **Output device selection in Windows mode** — when Sonar isn't running, the flyout now shows an "OUTPUT DEVICE" selector above the master strip that lists every active playback endpoint and switches the Windows default output (Console, Multimedia and Communications roles) on selection. The master strip re-binds to the newly selected device so its slider drives the right endpoint.
+
 ## [0.1.9] - 2026-07-13
 
 ### Fixed

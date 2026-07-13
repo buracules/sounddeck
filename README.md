@@ -70,7 +70,7 @@ python -m pip install -r requirements.txt
 2. Build the portable zip and installer:
 
 ```powershell
-.\build-installer.ps1 -Version 0.1.9          # add -Clean for a fresh build
+.\build-installer.ps1 -Version 0.2.0          # add -Clean for a fresh build
 ```
 
 Outputs land in `dist\`:

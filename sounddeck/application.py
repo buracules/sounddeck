@@ -18,7 +18,7 @@ from .startup import is_startup_enabled, set_startup_enabled
 from .tray import TrayController
 from .ui import FlyoutMixerWindow, SettingsWindow
 from .windows_apps import WindowsAppVolumes
-from .windows_volume import WindowsMic, WindowsVolume
+from .windows_volume import WindowsMic, WindowsOutputDevices, WindowsVolume
 
 
 class SonarControlApplication:
@@ -41,6 +41,7 @@ class SonarControlApplication:
         self._notifier = Notifier()
         self._client = SonarClient()
         self._win_volume = WindowsVolume()
+        self._win_devices = WindowsOutputDevices()
         self._app_volumes = WindowsAppVolumes()
         self._mic = WindowsMic()
         self._sonar_available = False
@@ -195,6 +196,7 @@ class SonarControlApplication:
                 # Sonar drives the real channels here — hide the per-app fallback mixer.
                 self._window.dispatch(lambda: self._window.set_app_volumes([]))
                 self._window.dispatch(lambda: self._window.set_mic(None))
+                self._window.dispatch(lambda: self._window.set_windows_output_devices([], None))
                 status = "Sonar connected" if was_unavailable else "Connected"
                 self._window.dispatch(lambda st=status: self._window.set_status(self._status(st)))
                 if show_toast:
@@ -215,6 +217,15 @@ class SonarControlApplication:
                 self._window.dispatch(lambda a=apps: self._window.set_app_volumes(a))
                 mic_state = self._mic.get_state() if self._mic.available else None
                 self._window.dispatch(lambda m=mic_state: self._window.set_mic(m))
+                # Let the user pick the Windows default output device in this mode.
+                try:
+                    out_devices = self._win_devices.list_devices()
+                    out_current = self._win_devices.get_default_id()
+                except Exception:
+                    out_devices, out_current = [], None
+                self._window.dispatch(
+                    lambda d=out_devices, c=out_current: self._window.set_windows_output_devices(d, c)
+                )
                 msg = f"Sonar unavailable: {exc}"
                 self._window.dispatch(lambda m=msg: self._window.set_status(self._status(m)))
 
@@ -327,6 +338,22 @@ class SonarControlApplication:
         threading.Thread(target=work, daemon=True).start()
 
     def select_device(self, channel_key: str, device_id: str) -> None:
+        if channel_key == "windows-output":
+            def work_win() -> None:
+                try:
+                    name = self._win_devices.set_default(device_id)
+                    # Re-bind the master strip to the newly selected default endpoint.
+                    self._win_volume.reload()
+                    self._window.dispatch(lambda n=name: self._window.set_status(self._status(f"Output: {n}")))
+                    self._notifier.show("SoundDeck", f"Output -> {name}")
+                    self.refresh_channels(show_toast=False)
+                except Exception as exc:
+                    msg = f"Output switch error: {exc}"
+                    self._window.dispatch(lambda m=msg: self._window.set_status(self._status(m)))
+
+            threading.Thread(target=work_win, daemon=True).start()
+            return
+
         def work() -> None:
             try:
                 result = self._api_switcher.set_device(channel_key, device_id)

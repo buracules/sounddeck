@@ -1589,6 +1589,8 @@ class FlyoutMixerWindow(QWidget):
         self._pid_label: dict[str, str] = {}
         self._shared_display_to_device_id: dict[str, str] = {}
         self._shared_source_channel_key = "game"
+        self._win_output_display_to_id: dict[str, str] = {}
+        self._win_output_sig: tuple | None = None
         self._compact_mode = False
         self._cyber_mode = False
         self._dispatcher = _UiDispatcher()
@@ -1646,6 +1648,22 @@ class FlyoutMixerWindow(QWidget):
         shared_layout.addWidget(self._shared_battery_label)
         self._shared_row.hide()
         panel_layout.addWidget(self._shared_row)
+
+        # Windows-mode default output selector (shown only when Sonar is unavailable).
+        self._win_output_host = QWidget()
+        self._win_output_host.setAutoFillBackground(False)
+        win_out_layout = QVBoxLayout(self._win_output_host)
+        win_out_layout.setContentsMargins(0, 0, 0, 2)
+        win_out_layout.setSpacing(3)
+        self._win_output_label = QLabel("OUTPUT DEVICE")
+        self._win_output_label.setObjectName("flyoutAppsLabel")
+        win_out_layout.addWidget(self._win_output_label)
+        self._win_output_combo = QComboBox()
+        self._win_output_combo.setObjectName("deviceCombo")
+        self._win_output_combo.currentTextChanged.connect(self._on_win_output_changed)
+        win_out_layout.addWidget(self._win_output_combo)
+        self._win_output_host.hide()
+        panel_layout.addWidget(self._win_output_host)
 
         cards_host = QWidget()
         cards_host.setAutoFillBackground(False)
@@ -2145,6 +2163,52 @@ class FlyoutMixerWindow(QWidget):
         if device_id:
             self._on_device_select(self._shared_source_channel_key, device_id)
 
+    def set_windows_output_devices(
+        self,
+        options: list[tuple[str, str]],
+        current_device_id: str | None,
+    ) -> None:
+        """Populate the Windows default-output selector. Empty list hides it.
+
+        A signature guard skips rebuilds when nothing changed, so the periodic
+        refresh does not fight the user (e.g. close an open dropdown).
+        """
+        sig = (tuple(options), current_device_id)
+        if not options:
+            self._win_output_sig = None
+            self._win_output_display_to_id.clear()
+            self._win_output_combo.blockSignals(True)
+            self._win_output_combo.clear()
+            self._win_output_combo.blockSignals(False)
+            if not self._win_output_host.isHidden():
+                self._win_output_host.hide()
+                self._apply_window_height()
+            return
+        if sig == self._win_output_sig and not self._win_output_host.isHidden():
+            return
+        self._win_output_sig = sig
+
+        normalized = [(dev_id, self._format_source_name(name)) for dev_id, name in options]
+        self._win_output_display_to_id = {name: dev_id for dev_id, name in normalized}
+        labels = [name for _, name in normalized]
+        selected = next((name for dev_id, name in normalized if dev_id == current_device_id), labels[0])
+        self._win_output_combo.blockSignals(True)
+        self._win_output_combo.clear()
+        self._win_output_combo.addItems(labels)
+        self._win_output_combo.setCurrentText(selected)
+        self._win_output_combo.setToolTip(selected)
+        self._win_output_combo.blockSignals(False)
+        was_hidden = self._win_output_host.isHidden()
+        self._win_output_host.show()
+        if was_hidden:
+            self._apply_window_height()
+
+    def _on_win_output_changed(self, text: str) -> None:
+        self._win_output_combo.setToolTip(text)
+        device_id = self._win_output_display_to_id.get(text)
+        if device_id:
+            self._on_device_select("windows-output", device_id)
+
     @staticmethod
     def _format_source_name(name: str) -> str:
         text = " ".join(str(name).replace("_", " ").split())
@@ -2478,6 +2542,9 @@ class FlyoutMixerWindow(QWidget):
         status_extra = 20 if self._status_label.isVisible() else 0
         hud_extra = (20 + 6 + 18 + 6) if self._cyber_mode else 0
         apps_extra = 0
+        # Windows-mode output-device selector: label + combo, above the master card.
+        if not self._win_output_host.isHidden():
+            apps_extra += self._win_output_host.sizeHint().height() + 6
         # Microphone section: label + one fixed row.
         if self._mic_host.isVisible():
             apps_extra += self._mic_host.sizeHint().height() + 4
@@ -2837,7 +2904,7 @@ class SettingsWindow(QDialog):
             self._tab_buttons[key] = button
             self._stack.addWidget(page)
         sidebar_layout.addStretch(1)
-        version = QLabel("v0.1.9")
+        version = QLabel("v0.2.0")
         version.setObjectName("settingsVersion")
         sidebar_layout.addWidget(version)
         self._select_tab(0, "general")

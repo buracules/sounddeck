@@ -1,6 +1,6 @@
 #define MyAppName "SoundDeck"
 #ifndef MyAppVersion
-  #define MyAppVersion "0.1.9"
+  #define MyAppVersion "0.2.0"
 #endif
 #define MyAppPublisher "SoundDeck Contributors"
 #define MyAppExeName "SoundDeck.exe"
