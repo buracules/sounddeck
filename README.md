@@ -4,12 +4,19 @@ A compact Windows **system-tray audio mixer** built with PySide6 — per-app vol
 
 <table>
   <tr>
+    <td></td>
     <td align="center"><b>Cyberpunk theme</b> (default)</td>
     <td align="center"><b>Standard theme</b></td>
   </tr>
   <tr>
-    <td><img src="docs/cyber.png" alt="SoundDeck cyberpunk theme" width="420"></td>
-    <td><img src="docs/screenshot.png" alt="SoundDeck standard theme" width="420"></td>
+    <td align="center"><b>Windows</b><br><sub>no SteelSeries</sub></td>
+    <td><img src="docs/cyber.png" alt="SoundDeck cyberpunk theme, Windows mode" width="380"></td>
+    <td><img src="docs/screenshot.png" alt="SoundDeck standard theme, Windows mode" width="380"></td>
+  </tr>
+  <tr>
+    <td align="center"><b>Sonar</b><br><sub>channels + apps</sub></td>
+    <td><img src="docs/cyber-sonar.png" alt="SoundDeck cyberpunk theme, Sonar mode" width="380"></td>
+    <td><img src="docs/screenshot-sonar.png" alt="SoundDeck standard theme, Sonar mode" width="380"></td>
   </tr>
 </table>
 
@@ -32,12 +39,14 @@ Tray-first UX (`QSystemTrayIcon`) with a frameless flyout panel, a **cyberpunk t
 - **Master** output volume/mute
 - **Microphone** volume/mute in its own section
 - **Per-app mixer** — every running app as a row with its icon, volume slider, live meter, and mute
-- Closed apps drop out of the list automatically
+- Closed apps drop out of the list automatically; Windows' own shell processes never appear
+- **Hide apps you don't want** — right-click a row to hide it (remembered across restarts); the `APPS` header restores them
 
 **With SteelSeries Sonar running:**
 
 - `MASTER` / `GAME` / `CHAT` / `MEDIA` channels with per-channel volume and mute
 - Per-channel output device selection (routable channels)
+- **The per-app mixer stays, below the channels** — Sonar picks which channel an app plays on, the mixer sets how loud the app itself is
 - Drag-and-drop app routing chips between channels
 - Local app alias support (e.g. `Gw2-64` → `Guild Wars 2`)
 
@@ -70,7 +79,7 @@ python -m pip install -r requirements.txt
 2. Build the portable zip and installer:
 
 ```powershell
-.\build-installer.ps1 -Version 0.2.0          # add -Clean for a fresh build
+.\build-installer.ps1 -Version 0.3.0          # add -Clean for a fresh build
 ```
 
 Outputs land in `dist\`:
@@ -91,6 +100,7 @@ sounddeck/
   sonar_client.py        # Sonar volume/mute wrapper
   sonar_api_switcher.py  # Sonar output device selection
   audio_routing.py       # Sonar per-app routing
+  audio_sessions.py      # cached lookup of app sessions across audio endpoints
   audio_levels.py        # Core Audio peak meters
   headset_battery.py     # Arctis battery over HID
   windows_volume.py      # Windows master + microphone (no Sonar)

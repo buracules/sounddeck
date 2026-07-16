@@ -12,6 +12,9 @@ class AppConfig:
     close_on_outside: bool = False
     lock_position: bool = False
     app_overrides: dict[str, dict[str, str]] | None = None
+    # Apps kept out of the mixer: {app_key: last known label}. The label is stored
+    # so the restore menu can name an app that is not currently running.
+    hidden_apps: dict[str, str] | None = None
 
 
 def _config_path() -> Path:
@@ -32,6 +35,9 @@ def load_config() -> AppConfig:
         app_overrides = data.get("app_overrides")
         if not isinstance(app_overrides, dict):
             app_overrides = {}
+        hidden_apps = data.get("hidden_apps")
+        if not isinstance(hidden_apps, dict):
+            hidden_apps = {}
         return AppConfig(
             compact_mode=bool(data.get("compact_mode", True)),
             cyber_mode=bool(data.get("cyber_mode", True)),
@@ -41,6 +47,11 @@ def load_config() -> AppConfig:
                 str(key): {str(k): str(v) for k, v in value.items() if isinstance(v, str)}
                 for key, value in app_overrides.items()
                 if isinstance(value, dict)
+            },
+            hidden_apps={
+                str(key): str(label)
+                for key, label in hidden_apps.items()
+                if isinstance(label, str)
             },
         )
     except Exception:
@@ -55,6 +66,7 @@ def save_config(config: AppConfig) -> None:
         "close_on_outside": config.close_on_outside,
         "lock_position": config.lock_position,
         "app_overrides": config.app_overrides or {},
+        "hidden_apps": config.hidden_apps or {},
     }
     path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 

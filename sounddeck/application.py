@@ -8,6 +8,7 @@ from time import monotonic
 from PySide6.QtWidgets import QApplication
 
 from .audio_levels import AudioLevelClient
+from .audio_sessions import AudioSessionRegistry
 from .headset_battery import HeadsetBattery
 from .audio_routing import AudioRoutingClient
 from .config import AppConfig, config_file_path, load_config, save_config
@@ -42,12 +43,15 @@ class SonarControlApplication:
         self._client = SonarClient()
         self._win_volume = WindowsVolume()
         self._win_devices = WindowsOutputDevices()
-        self._app_volumes = WindowsAppVolumes()
+        # One registry shared by the mixer and the meters: the endpoint lookups it
+        # caches are the expensive part of both, and sharing keeps them consistent.
+        self._sessions = AudioSessionRegistry()
+        self._app_volumes = WindowsAppVolumes(self._sessions)
         self._mic = WindowsMic()
         self._sonar_available = False
         self._api_switcher = SonarApiSwitcher()
         self._routing = AudioRoutingClient()
-        self._levels = AudioLevelClient()
+        self._levels = AudioLevelClient(self._sessions)
         self._headset_battery = HeadsetBattery()
         self._qapp = QApplication.instance() or QApplication(sys.argv)
         self._load_bundled_fonts()
@@ -65,7 +69,10 @@ class SonarControlApplication:
             on_app_toggle_mute=self.toggle_app_mute,
             on_mic_volume_change=self.set_mic_volume,
             on_mic_toggle_mute=self.toggle_mic_mute,
+            on_hide_app=self.hide_app,
+            on_unhide_app=self.unhide_app,
         )
+        self._window.set_hidden_apps(sorted((self._config.hidden_apps or {}).items()))
         self._pending_app_volume_jobs: dict[int, threading.Timer] = {}
 
         self._pending_volume_jobs: dict[str, threading.Timer] = {}
@@ -187,14 +194,18 @@ class SonarControlApplication:
                 session_options = list(pid_label.items())
                 if self.DEBUG_LOGS:
                     self._log_channel_apps(channel_apps)
+                # The per-app mixer rides below the Sonar channels rather than
+                # replacing them: Sonar decides which channel an app plays on,
+                # this sets how loud the app itself is. Independent knobs.
+                app_volumes = self._visible_apps()
                 was_unavailable = not self._sonar_available
                 self._sonar_available = True
                 self._window.dispatch(lambda: self._window.set_channels(channels))
                 self._window.dispatch(lambda s=selections: self._apply_device_selections(s))
                 self._window.dispatch(lambda opts=session_options: self._window.set_app_sessions(opts))
                 self._window.dispatch(lambda apps=channel_apps: self._window.set_channel_apps(apps))
-                # Sonar drives the real channels here — hide the per-app fallback mixer.
-                self._window.dispatch(lambda: self._window.set_app_volumes([]))
+                self._window.dispatch(lambda a=app_volumes: self._window.set_app_volumes(a))
+                # Sonar owns the mic as its own channel, so no separate mic strip.
                 self._window.dispatch(lambda: self._window.set_mic(None))
                 self._window.dispatch(lambda: self._window.set_windows_output_devices([], None))
                 status = "Sonar connected" if was_unavailable else "Connected"
@@ -210,10 +221,7 @@ class SonarControlApplication:
                     channel = self._win_volume.get_state()
                     self._window.dispatch(lambda ch=channel: self._window.set_channels([ch]))
                 # Sonar-independent mixer: list every app's own volume/mute.
-                try:
-                    apps = self._app_volumes.list_apps()
-                except Exception:
-                    apps = []
+                apps = self._visible_apps()
                 self._window.dispatch(lambda a=apps: self._window.set_app_volumes(a))
                 mic_state = self._mic.get_state() if self._mic.available else None
                 self._window.dispatch(lambda m=mic_state: self._window.set_mic(m))
@@ -342,8 +350,11 @@ class SonarControlApplication:
             def work_win() -> None:
                 try:
                     name = self._win_devices.set_default(device_id)
-                    # Re-bind the master strip to the newly selected default endpoint.
+                    # Re-bind the master strip to the newly selected default endpoint,
+                    # and drop the cached endpoints so meters follow it immediately
+                    # instead of metering the old one until the cache expires.
                     self._win_volume.reload()
+                    self._sessions.invalidate()
                     self._window.dispatch(lambda n=name: self._window.set_status(self._status(f"Output: {n}")))
                     self._notifier.show("SoundDeck", f"Output -> {name}")
                     self.refresh_channels(show_toast=False)
@@ -367,6 +378,36 @@ class SonarControlApplication:
                 self._window.dispatch(lambda m=msg: self._window.set_status(self._status(m)))
 
         threading.Thread(target=work, daemon=True).start()
+
+    def _visible_apps(self) -> list:
+        """The per-app mixer's rows: everything with an audio session, less what
+        the user has hidden."""
+        try:
+            apps = self._app_volumes.list_apps()
+        except Exception:
+            return []
+        hidden = self._config.hidden_apps or {}
+        return [app for app in apps if app.key not in hidden]
+
+    def hide_app(self, app_key: str, label: str) -> None:
+        if not app_key:
+            return
+        hidden = dict(self._config.hidden_apps or {})
+        hidden[app_key] = label or app_key
+        self._config.hidden_apps = hidden
+        save_config(self._config)
+        self._window.set_hidden_apps(sorted(hidden.items()))
+        self._window.set_status(self._status(f"{label} hidden — right-click APPS to restore"))
+        self.refresh_channels(show_toast=False)
+
+    def unhide_app(self, app_key: str) -> None:
+        hidden = dict(self._config.hidden_apps or {})
+        if hidden.pop(app_key, None) is None:
+            return
+        self._config.hidden_apps = hidden
+        save_config(self._config)
+        self._window.set_hidden_apps(sorted(hidden.items()))
+        self.refresh_channels(show_toast=False)
 
     def _apply_device_selections(self, selections: dict[str, DeviceSelection | None]) -> None:
         stream_to_channels: dict[str, list[str]] = {}

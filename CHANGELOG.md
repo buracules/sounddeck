@@ -4,6 +4,23 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog and this project follows Semantic Versioning.
 
+## [0.3.0] - 2026-07-16
+
+### Added
+- **Apps can be hidden from the mixer** — right-click a row and pick *Hide*, for the background utilities that hold an audio session but never need a volume slider. The choice is remembered by executable name, so it survives restarts. The `APPS` header shows how many are hidden and restores them from its right-click menu (individually or all at once), so nothing is hidden without a visible way back.
+- **The per-app mixer now stays visible when Sonar is running**, below the channel strips, instead of being hidden. The two are independent controls: Sonar decides which channel an app plays on, the mixer sets how loud the app itself is.
+
+### Fixed
+- **The flyout opened too short and its sections drew on top of each other**, then jumped to full height a moment later. Its height was measured before the window was shown, and Qt reports not-yet-shown widgets as empty — so the microphone and app sections, which a background refresh fills in while the flyout is closed, counted for nothing. The window is now measured once shown (invisibly, so nothing flashes at the wrong size), and the height comes from the layout rather than a hand-summed list of constants that had drifted out of date.
+- The version in Settings › About was hardcoded and still read `v0.2.0`. It now comes from `sounddeck.__version__`, the one place the app states its version.
+- **Apps playing on a Sonar channel were missing from the per-app mixer.** Sessions were only read from the default endpoint, but Sonar gives each channel its own virtual endpoint; every active render endpoint is now read. An app holding sessions on several endpoints at once also has volume and mute applied to all of them, instead of only the first.
+
+### Changed
+- **Windows' own shell processes are no longer listed in the per-app mixer.** `ShellExperienceHost` and friends hold audio sessions and would otherwise sit in the list permanently once they made a sound. They are recognised by living under the Windows directory, where installed apps never do, so no list of process names has to be maintained as Windows adds its own.
+- **Peak metering got ~250x cheaper** — one poll went from ~330ms to ~1ms. It was re-enumerating all ~47 audio endpoints Windows remembers (nearly all unplugged, disabled or absent) on every pass, 12 times a second, which left the meter thread permanently saturated and the meters updating at roughly 3fps. Endpoint lookups are now resolved once and reused (`audio_sessions.py`), and only live render endpoints are considered. Listing apps dropped from ~14ms to ~2ms with it.
+- Audio session lookups now initialise COM on the thread that uses them, rather than depending on another component having done it first on the main thread.
+- `psutil` is now listed explicitly in `requirements.txt` (previously an implicit dependency of `pycaw`).
+
 ## [0.2.0] - 2026-07-13
 
 ### Added

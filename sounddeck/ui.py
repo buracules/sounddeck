@@ -34,6 +34,7 @@ from PySide6.QtWidgets import (
     QSizePolicy,
 )
 
+from . import __version__
 from .models import ChannelState
 
 
@@ -1398,15 +1399,25 @@ def _tinted_pixmap(pixmap: QPixmap, color: str) -> QPixmap:
 class AppVolumeRow(QFrame):
     """One per-app strip (icon + name + slider + VU meter + value + mute)."""
 
-    def __init__(self, app, on_volume, on_mute, cyber: bool = False, is_mic: bool = False) -> None:
+    def __init__(
+        self,
+        app,
+        on_volume,
+        on_mute,
+        cyber: bool = False,
+        is_mic: bool = False,
+        on_hide: Callable[[str, str], None] | None = None,
+    ) -> None:
         super().__init__()
         self.setObjectName("appVolumeRow")
         self._pid = int(app.pid)
         self._on_volume = on_volume
         self._on_mute = on_mute
+        self._on_hide = on_hide
         self._muted = bool(app.muted)
         self._full_name = str(app.name)
         self._exe_path = str(getattr(app, "exe_path", ""))
+        self._key = str(getattr(app, "key", ""))
         self._is_mic = bool(is_mic)
         self._cyber = bool(cyber)
 
@@ -1460,6 +1471,15 @@ class AppVolumeRow(QFrame):
 
         self._elide()
         self._sync_mute()
+
+    def contextMenuEvent(self, event) -> None:  # type: ignore[override]
+        # The mic strip reuses this row but is not an app, so it cannot be hidden.
+        if self._on_hide is None or self._is_mic or not self._key:
+            return
+        menu = QMenu(self)
+        hide_action = menu.addAction(f"Hide {self._full_name}")
+        if menu.exec(event.globalPos()) == hide_action:
+            self._on_hide(self._key, self._full_name)
 
     def _apply_icon(self) -> None:
         if self._is_mic:
@@ -1548,6 +1568,8 @@ class FlyoutMixerWindow(QWidget):
         on_app_toggle_mute: Callable[[int], None] | None = None,
         on_mic_volume_change: Callable[[int], None] | None = None,
         on_mic_toggle_mute: Callable[[], None] | None = None,
+        on_hide_app: Callable[[str, str], None] | None = None,
+        on_unhide_app: Callable[[str], None] | None = None,
     ) -> None:
         super().__init__(None)
         # Set before any window ops below: setWindowTitle/setWindowFlags can fire
@@ -1574,6 +1596,9 @@ class FlyoutMixerWindow(QWidget):
         self._on_hide = on_hide
         self._on_app_volume_change = on_app_volume_change
         self._on_app_toggle_mute = on_app_toggle_mute
+        self._on_hide_app = on_hide_app
+        self._on_unhide_app = on_unhide_app
+        self._hidden_apps: list[tuple[str, str]] = []
         self._on_mic_volume_change = on_mic_volume_change
         self._on_mic_toggle_mute = on_mic_toggle_mute
 
@@ -1695,10 +1720,13 @@ class FlyoutMixerWindow(QWidget):
         self._mic_host.hide()
         panel_layout.addWidget(self._mic_host)
 
-        # Sonar-independent per-app mixer: shown only when Sonar is unavailable.
+        # Per-app mixer. Right-clicking the header is the way back for anything
+        # hidden from it, so the label says so once something is.
         self._apps_section_label = QLabel("APPS")
         self._apps_section_label.setObjectName("flyoutAppsLabel")
         self._apps_section_label.setContentsMargins(0, 5, 0, 0)
+        self._apps_section_label.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self._apps_section_label.customContextMenuRequested.connect(self._show_hidden_apps_menu)
         self._apps_section_label.hide()
         panel_layout.addWidget(self._apps_section_label)
 
@@ -2535,31 +2563,23 @@ class FlyoutMixerWindow(QWidget):
             rows_h = sum(card.height() for card in rows) + max(0, len(rows) - 1) * 5
         else:
             rows_h = 58 if self._compact_mode else 74
-        scroll_h = min(rows_h, MAX_SCROLL_H)
-        self._cards_scroll.setFixedHeight(scroll_h)
-        # 36 base (margins) + 34 header (28px + 6px layout spacing)
-        extra = (30 + 6) if not self._shared_row.isHidden() else 0
-        status_extra = 20 if self._status_label.isVisible() else 0
-        hud_extra = (20 + 6 + 18 + 6) if self._cyber_mode else 0
-        apps_extra = 0
-        # Windows-mode output-device selector: label + combo, above the master card.
-        if not self._win_output_host.isHidden():
-            apps_extra += self._win_output_host.sizeHint().height() + 6
-        # Microphone section: label + one fixed row.
-        if self._mic_host.isVisible():
-            apps_extra += self._mic_host.sizeHint().height() + 4
-        # Apps section: label + scroll capped at 5 rows.
+        self._cards_scroll.setFixedHeight(min(rows_h, MAX_SCROLL_H))
+        # Apps section: cap the scroll at 5 rows; past that it scrolls.
         app_rows = list(self._app_rows.values())
-        if self._apps_scroll.isVisible() and app_rows:
+        if not self._apps_scroll.isHidden() and app_rows:
             gap = 4
             row_h = app_rows[0].sizeHint().height()
             total_h = sum(r.sizeHint().height() for r in app_rows) + max(0, len(app_rows) - 1) * gap
             max_visible = 5
             cap_h = max_visible * row_h + (max_visible - 1) * gap
-            apps_scroll_h = min(total_h, cap_h) + 2
-            self._apps_scroll.setFixedHeight(apps_scroll_h)
-            apps_extra += self._apps_section_label.sizeHint().height() + 5 + apps_scroll_h + 6
-        new_height = 70 + extra + scroll_h + status_extra + hud_extra + apps_extra
+            self._apps_scroll.setFixedHeight(min(total_h, cap_h) + 2)
+        # Both scroll areas are now fixed-height, so the layout knows exactly how
+        # much height every section needs — ask it instead of summing constants.
+        # activate() first: the panel only recomputes its layout when the event
+        # loop next runs, so without this the answer can still describe the rows
+        # as they were before this refresh added or removed any.
+        self._panel.layout().activate()
+        new_height = self.layout().minimumSize().height()
         old_geo = self.geometry()
         height_changed = new_height != old_geo.height()
         self.setFixedHeight(new_height)
@@ -2612,6 +2632,41 @@ class FlyoutMixerWindow(QWidget):
         self._apps_scroll.setVisible(visible)
         self._apps_section_label.setVisible(visible)
 
+    def set_hidden_apps(self, hidden: list[tuple[str, str]]) -> None:
+        """[(app key, label)] currently kept out of the mixer."""
+        self._hidden_apps = list(hidden)
+        # Hiding an app removes its row, so the header is the only thing left to
+        # advertise the way back — otherwise the app is simply gone with no clue.
+        count = len(self._hidden_apps)
+        self._apps_section_label.setText(f"APPS · {count} HIDDEN" if count else "APPS")
+        self._apps_section_label.setToolTip(
+            "Right-click to restore hidden apps" if count else ""
+        )
+
+    def _show_hidden_apps_menu(self, pos: QPoint) -> None:
+        menu = QMenu(self)
+        if not self._hidden_apps:
+            empty = menu.addAction("No hidden apps")
+            empty.setEnabled(False)
+            menu.exec(self._apps_section_label.mapToGlobal(pos))
+            return
+
+        actions = {}
+        for key, label in self._hidden_apps:
+            actions[menu.addAction(f"Show {label}")] = key
+        menu.addSeparator()
+        show_all = menu.addAction("Show all")
+
+        chosen = menu.exec(self._apps_section_label.mapToGlobal(pos))
+        if chosen is None or self._on_unhide_app is None:
+            return
+        if chosen == show_all:
+            for _, key in actions.items():
+                self._on_unhide_app(key)
+            return
+        if chosen in actions:
+            self._on_unhide_app(actions[chosen])
+
     def set_app_volumes(self, apps: list) -> None:
         """Populate the Sonar-independent per-app mixer. Empty list clears the apps."""
         if not apps:
@@ -2639,6 +2694,7 @@ class FlyoutMixerWindow(QWidget):
                     self._on_app_volume_change,
                     self._on_app_toggle_mute,
                     cyber=self._cyber_mode,
+                    on_hide=self._on_hide_app,
                 )
                 self._app_rows[pid] = row
                 self._apps_layout.addWidget(row)
@@ -2740,6 +2796,14 @@ class FlyoutMixerWindow(QWidget):
             card.set_muted(muted)
 
     def show_near(self, tray_rect: QRect | None) -> None:
+        # Qt measures a widget only once its window is shown; anything built while
+        # the flyout was closed (an app row from a background refresh, the mic
+        # section) counts as empty until then. Measuring before show() therefore
+        # reports a height far too short and the sections pile up on each other.
+        # So show first — transparent, so nothing flashes at the stale position —
+        # then measure, place, and reveal.
+        self.setWindowOpacity(0.0)
+        self.show()
         self._apply_window_height()
         if tray_rect is None or tray_rect.isNull():
             self._grow_upward = True
@@ -2766,7 +2830,7 @@ class FlyoutMixerWindow(QWidget):
                 y = max(geo.top() + 6, min(y, geo.bottom() - self.height() - 6))
                 self.move(x, y)
 
-        self.show()
+        self.setWindowOpacity(1.0)
         self.raise_()
         self.activateWindow()
         self.setFocus(Qt.FocusReason.ActiveWindowFocusReason)
@@ -2904,7 +2968,7 @@ class SettingsWindow(QDialog):
             self._tab_buttons[key] = button
             self._stack.addWidget(page)
         sidebar_layout.addStretch(1)
-        version = QLabel("v0.2.0")
+        version = QLabel(f"v{__version__}")
         version.setObjectName("settingsVersion")
         sidebar_layout.addWidget(version)
         self._select_tab(0, "general")

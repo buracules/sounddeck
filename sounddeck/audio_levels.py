@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import threading
 from dataclasses import dataclass
+from time import monotonic
+
+from .audio_sessions import AudioSessionRegistry
 
 
 @dataclass
@@ -17,16 +21,15 @@ class AudioLevelClient:
     audio stack is unavailable, callers get silent levels instead of failures.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, registry: AudioSessionRegistry | None = None) -> None:
         self._available = False
-        self._multi_device = False
         self._audio_utilities = None
         self._meter_interface = None
         self._clsctx_all = None
         self._cast = None
         self._pointer = None
-        self._session_mgr_interface = None
-        self._session_ctrl2_interface = None
+        self._sessions = registry or AudioSessionRegistry()
+        self._local = threading.local()
         self._load()
 
     @property
@@ -58,60 +61,61 @@ class AudioLevelClient:
         self._pointer = POINTER
         self._available = True
 
-        # Multi-device: read sessions from all Sonar virtual endpoints.
-        try:
-            from pycaw.pycaw import IAudioSessionManager2, IAudioSessionControl2
-            self._session_mgr_interface = IAudioSessionManager2
-            self._session_ctrl2_interface = IAudioSessionControl2
-            self._multi_device = True
-        except Exception:
-            pass
-
     def _read_master_peak(self) -> float:
+        meter = self._master_meter()
+        if meter is None:
+            return 0.0
         try:
-            speakers = self._audio_utilities.GetSpeakers()
-            interface = speakers.Activate(self._meter_interface._iid_, self._clsctx_all, None)
-            meter = self._cast(interface, self._pointer(self._meter_interface))
             return self._clamp(meter.GetPeakValue())
         except Exception:
+            # The endpoint went away underneath us; re-resolve on the next poll.
+            self._sessions.invalidate()
             return 0.0
 
+    def _master_meter(self):
+        """
+        The default endpoint's meter. Re-resolving it costs ~12ms — most of a
+        poll — so it is kept for as long as the registry's endpoints are: dropped
+        at once when we change the default output ourselves, and otherwise re-read
+        on the same interval, which is what catches a default changed in Windows.
+        """
+        cached = getattr(self._local, "meter", None)
+        generation = self._sessions.generation
+        if cached is not None:
+            meter, cached_generation, built_at = cached
+            fresh = monotonic() - built_at < self._sessions.REBUILD_INTERVAL_SECONDS
+            if cached_generation == generation and fresh:
+                return meter
+        meter = None
+        device = self._sessions.default_render_device()
+        if device is not None:
+            try:
+                interface = device.Activate(self._meter_interface._iid_, self._clsctx_all, None)
+                meter = self._cast(interface, self._pointer(self._meter_interface))
+            except Exception:
+                meter = None
+        self._local.meter = (meter, generation, monotonic())
+        return meter
+
     def _read_session_peaks(self) -> dict[int, float]:
-        if self._multi_device:
+        if self._sessions.available:
             return self._read_all_device_peaks()
         return self._read_default_device_peaks()
 
     def _read_all_device_peaks(self) -> dict[int, float]:
         out: dict[int, float] = {}
-        try:
-            devices = self._audio_utilities.GetAllDevices()
-            for device in devices:
-                try:
-                    # QueryInterface properly AddRefs — avoids double-Release from cast()
-                    manager = device._dev.Activate(
-                        self._session_mgr_interface._iid_,
-                        self._clsctx_all,
-                        None,
-                    ).QueryInterface(self._session_mgr_interface)
-                    session_enum = manager.GetSessionEnumerator()
-                    for j in range(session_enum.GetCount()):
-                        try:
-                            ctrl2 = session_enum.GetSession(j).QueryInterface(
-                                self._session_ctrl2_interface
-                            )
-                            pid = int(ctrl2.GetProcessId())
-                            if pid <= 0:
-                                continue
-                            peak = self._clamp(
-                                ctrl2.QueryInterface(self._meter_interface).GetPeakValue()
-                            )
-                            out[pid] = max(out.get(pid, 0.0), peak)
-                        except Exception:
-                            continue
-                except Exception:
+        for control in self._sessions.session_controls():
+            try:
+                pid = int(control.GetProcessId())
+                if pid <= 0:
                     continue
-        except Exception:
-            pass
+                peak = self._clamp(
+                    control.QueryInterface(self._meter_interface).GetPeakValue()
+                )
+                # One app can play on several endpoints; loudest wins.
+                out[pid] = max(out.get(pid, 0.0), peak)
+            except Exception:
+                continue
         return out
 
     def _read_default_device_peaks(self) -> dict[int, float]:
